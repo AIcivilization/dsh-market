@@ -84,8 +84,10 @@ already-running process:
 dsh --profile desktop
 ```
 
-After restart the sidebar's top row shows the two controls, **更新** and
-**重启 DSH**. The host half logs its mounted route prefix on boot:
+After restart, open the 插件 / Plugins page. Its header shows the two controls,
+**更新** and **重启 DSH**, beside the page's own refresh icon and **添加插件**
+button. They appear only there; the rest of the shell is untouched. The host
+half logs its mounted route prefix on boot:
 
 ```
 dsh-market: serving /dsh-market/api/* for profile "desktop" (launcher profileContext) — runtime web, restart available

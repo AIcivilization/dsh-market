@@ -1,18 +1,23 @@
 /**
- * The two top-row controls: 更新 (update) and 重启 DSH (restart).
+ * The two controls: 更新 (update) and 重启 DSH (restart).
  *
- * Rendered into `shell.overlay` and absolutely positioned over the sidebar's
- * logo row, so it must never assume it owns the column: it is a small,
- * self-sized floating box that leaves the logo and collapse toggle visible and
- * clickable.
+ * They belong in the PLUGINS PAGE header, beside that page's own refresh icon
+ * and "add plugin" button. `@deepseek-ai/dsh-client-ui-plugin-manager` renders
+ * that toolbar itself and declares no slot inside it (its only injectable slots
+ * are `plugins.detail.*`, `plugins.item`, `plugins.row.config` and
+ * `plugins.bundle.*`), so there is nowhere to register into.
  *
- * Positioning needs to know which sidebar width is in play, and the overlay
- * slot hands out no owner props (it is frame-wide, not sidebar-scoped), so the
- * component derives the state from the DOM: it watches the sidebar column's
- * measured width. That keeps the plugin working across DSH versions without
- * patching ui-sidebar.
+ * Instead this component renders into `shell.overlay` and MOVES ITSELF into the
+ * plugin page's toolbar once that page mounts. The portal target is found by
+ * `data-plugin-panel` — the stable hook the plugin manager puts on its `<section>`
+ * — and the toolbar is the element that holds the page's refresh button, so the
+ * match never depends on a hashed CSS-module class name.
+ *
+ * Nothing is shown while the plugins page is closed: the controls exist only
+ * there, so the shell stays exactly as DSH ships it.
  */
 import { useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   IconCheckOutlineRegular,
   IconLoadingOutlineRegular,
@@ -46,8 +51,6 @@ export type TopRowControlsProps =
   PropsRuntime<'shell.overlay'>
   & PropsLocale<'dshMarket.topRow'>
 
-/** Width at or below which the sidebar renders its 56px control rail. */
-const RAIL_MAX_WIDTH = 60
 
 /**
  * Whether a reason key should be prefixed with the generic "unsupported"
@@ -73,122 +76,52 @@ function errorText(error: string | undefined, t: Translate): string {
 }
 
 /**
- * Derive the sidebar's collapsed state from the live DOM.
+ * Locate the plugins page toolbar and keep track of it as the page mounts and
+ * unmounts.
  *
- * ui-sidebar owns the column; the overlay does not receive its width. Measuring
- * the rendered column is the only upgrade-safe way to follow it.
- * @returns collapsed flag plus the measured expanded width.
+ * `@deepseek-ai/dsh-client-ui-plugin-manager` marks its page root with
+ * `data-plugin-panel`; the toolbar we want is the element inside that page which
+ * contains the page's own refresh control (it is an `<button>` carrying
+ * `aria-busy`, set from the page's `refreshing` state). Matching on those two
+ * structural facts avoids hashed CSS-module class names entirely, so a DSH
+ * restyle cannot silently detach the controls.
+ *
+ * The page is mounted and unmounted as the user opens and closes the 插件 panel,
+ * and it swaps between a `main`/`detail` view, so this re-scans on DOM changes
+ * and reports `undefined` whenever the toolbar is not on screen.
+ * @returns the toolbar element to portal into, or undefined when absent.
  */
-function useSidebarGeometry(): { readonly collapsed: boolean; readonly width: number } {
-  const [geometry, setGeometry] = useState({ collapsed: false, width: 260 })
+function usePluginToolbar(): HTMLElement | undefined {
+  const [toolbar, setToolbar] = useState<HTMLElement>()
 
   useEffect(() => {
-    const measure = (): void => {
-      // The sidebar column is the first grid child of the frame; identify it by
-      // its own inline width or, failing that, by being a narrow first column.
-      const candidates = document.querySelectorAll<HTMLElement>('body > * *, [class*="root"]')
-      let best: HTMLElement | undefined
-      for (const element of candidates) {
-        const rect = element.getBoundingClientRect()
-        // The column is tall, starts at the very left, and is narrower than
-        // half the viewport (an expanded sidebar is ~200–320px).
-        if (rect.top <= 2 && rect.left <= 2 && rect.height > window.innerHeight * 0.5 && rect.width > 0
-          && rect.width <= Math.min(400, window.innerWidth * 0.5)) {
-          if (best === undefined || rect.width > best.getBoundingClientRect().width) best = element
-        }
-      }
-      const width = best?.getBoundingClientRect().width
-      if (width === undefined) return
-      setGeometry(previous => (previous.collapsed === (width <= RAIL_MAX_WIDTH) && previous.width === width
-        ? previous
-        : { collapsed: width <= RAIL_MAX_WIDTH, width }))
+    const locate = (): void => {
+      const page = document.querySelector<HTMLElement>('[data-plugin-panel]')
+      const found = page === null
+        ? undefined
+        : [...page.querySelectorAll<HTMLElement>('button[aria-busy]')]
+            .map(button => button.parentElement)
+            .find((candidate): candidate is HTMLElement => candidate !== null && candidate !== undefined)
+      setToolbar(previous => (previous === found ? previous : found))
     }
 
-    measure()
-    const observer = new MutationObserver(measure)
-    observer.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'], subtree: true })
-    window.addEventListener('resize', measure)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', measure)
-    }
-  }, [])
-
-  return geometry
-}
-
-/** Height of the band the controls occupy, in px; mirrors `--dsh-controls-row-height`. */
-const RESERVED_ROW_HEIGHT = 34
-
-/**
- * Push ui-sidebar's own content down so the floating controls get a band of
- * their own.
- *
- * The overlay layer is painted ABOVE the columns and intercepts nothing, so
- * without this the buttons would sit on top of the brand row or the first
- * content row — whichever we choose, they would cover a real control, because
- * the sidebar's top area is fully packed: a 60px brand band starting at 6px,
- * then the new-session button at 70px, then the panel list.
- *
- * ui-sidebar lays those rows out as direct children of its own root, so there
- * is no single scroller to pad. Instead we find the brand row and push every
- * following sibling down by the band height with `margin-top`. That leaves the
- * brand row untouched (it stays where DSH put it) and opens exactly the gap the
- * controls need. Every override is recorded and undone on unmount.
- */
-function useReservedRow(): void {
-  useEffect(() => {
-    /** Elements we have shifted, with their original `margin-top` values. */
-    const shifted = new Map<HTMLElement, string>()
-
-    const release = (): void => {
-      for (const [element, value] of shifted) element.style.marginTop = value
-      shifted.clear()
-    }
-
-    const apply = (): void => {
-      const brandRow = document.querySelector<HTMLElement>('[class*="logoRow"]')
-      const parent = brandRow?.parentElement
-      if (brandRow === null || brandRow === undefined || parent === null || parent === undefined) return
-
-      const rows = [...parent.children].filter((child): child is HTMLElement => child instanceof HTMLElement)
-      const index = rows.indexOf(brandRow)
-      if (index < 0) return
-
-      // The rows after the brand band are the ones that must move down. If the
-      // shift is already in place, leave the recorded originals alone.
-      const followers = rows.slice(index + 1)
-      if (followers.length === 0) return
-      if (followers.every((element) => shifted.has(element))) return
-
-      release()
-      for (const element of followers) {
-        shifted.set(element, element.style.marginTop)
-        element.style.marginTop = `${RESERVED_ROW_HEIGHT}px`
-      }
-    }
-
-    apply()
-    const observer = new MutationObserver(apply)
+    locate()
+    const observer = new MutationObserver(locate)
     observer.observe(document.body, { childList: true, subtree: true })
-    window.addEventListener('resize', apply)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', apply)
-      release()
-    }
+    return () => { observer.disconnect() }
   }, [])
+
+  return toolbar
 }
 
 /**
- * Render the update + restart controls.
+ * Render the update + restart controls inside the plugins page header.
  * @param props - composed slot props (runtime share + locale seat).
- * @returns the controls element.
+ * @returns the controls element, or null while the plugins page is closed.
  */
 export function TopRowControls({ t }: TopRowControlsProps) {
   const controls = useControls()
-  const geometry = useSidebarGeometry()
-  useReservedRow()
+  const toolbar = usePluginToolbar()
   const [panelOpen, setPanelOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const panelId = useId()
@@ -215,12 +148,10 @@ export function TopRowControls({ t }: TopRowControlsProps) {
   const updateTitle = updateTooltip(update, t)
   const restartTitle = restartTooltip(restart, t)
 
-  return (
+  const content = (
     <div
       ref={root}
       className={css.root}
-      data-collapsed={geometry.collapsed ? 'true' : 'false'}
-      style={{ '--dsh-controls-sidebar-width': `${geometry.width}px` } as React.CSSProperties}
     >
       <div className={css.buttons}>
         <Tooltip label={updateTitle} side="bottom" delayMs={400}>
@@ -289,6 +220,11 @@ export function TopRowControls({ t }: TopRowControlsProps) {
       )}
     </div>
   )
+
+  // Inside the plugin page's toolbar the controls stack with its own refresh and
+  // "add plugin" buttons, so they render plainly there; the overlay path is only
+  // used before the page exists (never visible) to keep the slot entry stable.
+  return toolbar === undefined ? null : createPortal(content, toolbar)
 }
 
 /** The update button's glyph, reflecting its phase. */

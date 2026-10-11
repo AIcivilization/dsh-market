@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 **Update and restart controls for DeepSeek Harness, in the row you already look at.**
 
-Two buttons in the sidebar's top row — one checks every installed plugin for updates and installs them all in a click, one restarts DSH.
+Two buttons in the plugins page header — one checks every installed plugin for updates and installs them all in a click, one restarts DSH.
 
 ## What you get
 
@@ -21,7 +21,7 @@ Two buttons in the sidebar's top row — one checks every installed plugin for u
 dsh plugin --profile web add dsh-market
 ```
 
-Restart `dsh web`, then reload the page. The two buttons appear in the top row of the sidebar.
+Restart `dsh web`, then reload the page and open the 插件/Plugins page. The two buttons appear in that page's header, next to its refresh icon and **add plugin** button.
 
 <!-- INSTALL-TAIL -->
 
@@ -36,7 +36,7 @@ Restart `dsh web`, then reload the page. The two buttons appear in the top row o
 
 **The host half** mounts into the DSH host process and serves a small JSON API under `/dsh-market/api/*`. It reads the active profile — its `package.json`, its `dsh.profile.bundles`, and its installed `node_modules` — to work out what is installed and at which version. Update detection is a pure comparison against the package's own upstream: the npm registry's `latest` dist-tag, or a git remote's advertised HEAD. Applying an update runs your profile's own package manager against the profile directory, then verifies the version on disk actually changed, because a package manager that exits 0 without changing anything is exactly the failure a naive updater reports as success.
 
-**The browser half** registers into the frame's floating layer and draws the two buttons over the sidebar's top row, which the official sidebar owns exclusively and offers no slot for. The overlay is click-through apart from the buttons themselves, and it follows the sidebar's collapsed and expanded states.
+**The browser half** registers into the frame's floating layer, then portals the two buttons into the plugins page header once that page mounts. The plugin manager renders that header itself and exposes no slot inside it (only `plugins.detail.*`, `plugins.item`, `plugins.row.config` and `plugins.bundle.*`), so the header is located by the `data-plugin-panel` hook it puts on its page root plus the refresh control it renders there — never by a hashed CSS-module class. Nothing is drawn while the plugins page is closed, so the rest of the shell stays exactly as DSH ships it.
 
 Both buttons degrade to a disabled state with an explanation when the host cannot do the thing — never an enabled button that silently fails.
 
