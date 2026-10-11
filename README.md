@@ -12,6 +12,7 @@ Two buttons in the plugins page header — one checks every installed plugin for
 - **Update all, with live progress** — one click installs every updatable plugin. Each package reports its own state (pending / running / done / failed), and one failing package does not abort the rest: you get a per-package report rather than a single opaque error.
 - **Honest about what it checked** — the button distinguishes "nothing to update" from "nothing was examined". A scan that could not run says so instead of quietly reporting you are up to date.
 - **Restart DSH in place** — for terminal-launched `dsh web`, one click re-executes the exact invocation that booted your host and brings it back, reloading the page when the new process answers.
+- **Confirms before it kills anything** — the restart button asks first, and when it can, it says whether tasks are running. If it cannot tell, it says that too rather than implying the coast is clear.
 - **Knows how to restart itself in each environment** — a plain `dsh web` host replays its own invocation; under DSH Desktop, where the host is a child of the Electron shell, the button relaunches the app bundle (`open -n`) and stops the shell instead. Neither path kills a process it cannot bring back. Under a process supervisor restart is refused outright, and the button disables itself and says who owns it.
 - **No dependencies on other plugins.** The whole thing is self-contained: it reads your profile and drives your package manager itself.
 

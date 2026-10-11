@@ -17,6 +17,7 @@ import {
   fetchSummary,
   probeHost,
   requestRestart,
+  fetchTasks,
   startUpdateAll,
   type RestartOutcome,
 } from '../../src/client/api.ts'
@@ -403,5 +404,24 @@ describe('error classification', () => {
     expect(failure.code).toBe('aborted')
     // `permanent` gates the "disable forever" path; abort must not trip it.
     expect(failure.permanent).toBe(false)
+  })
+})
+
+describe('fetchTasks', () => {
+  it('reads the flags the confirmation dialog branches on', async () => {
+    const { fetchImpl } = createFetchStub([json(200, { known: true, activeTasks: true, scheduledTasks: false })])
+    await expect(fetchTasks({ fetchImpl })).resolves.toEqual({ known: true, activeTasks: true, scheduledTasks: false })
+  })
+
+  it('reports an unreachable host as unknown, never as idle', async () => {
+    // The dialog treats unknown as a reason to warn. A throw here would skip
+    // the confirmation entirely, which is the one outcome that must not happen.
+    const { fetchImpl } = createFetchStub([{ kind: 'network', message: 'offline' }])
+    await expect(fetchTasks({ fetchImpl })).resolves.toEqual({ known: false, activeTasks: false, scheduledTasks: false })
+  })
+
+  it('does not trust a malformed body', async () => {
+    const { fetchImpl } = createFetchStub([json(200, { activeTasks: 'yes' })])
+    await expect(fetchTasks({ fetchImpl })).resolves.toEqual({ known: false, activeTasks: false, scheduledTasks: false })
   })
 })

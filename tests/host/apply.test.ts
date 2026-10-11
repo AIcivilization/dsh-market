@@ -72,13 +72,15 @@ describe('resolvePackageManager', () => {
   })
 
   it('mounts the full route table with packageManager omitted', () => {
+    // 8 since the task probe joined: ping, capabilities, updates/summary,
+    // updates, updates/all, operations, tasks, restart.
     const routes = createRoutes({
       profileDir: scratch(),
       profileName: 'desktop',
       startedBundles: [],
       desktopService: false,
     } as never)
-    expect(routes).toHaveLength(7)
+    expect(routes).toHaveLength(8)
   })
 })
 

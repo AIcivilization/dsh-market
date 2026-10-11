@@ -16,7 +16,7 @@
  * Nothing is shown while the plugins page is closed: the controls exist only
  * there, so the shell stays exactly as DSH ships it.
  */
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   IconCheckOutlineRegular,
@@ -26,6 +26,8 @@ import {
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { fetchTasks, type TaskSnapshot } from './api.ts'
+import { isWarning, warningKey } from './restartConfirm.ts'
 import { UpdatePanel } from './UpdatePanel.tsx'
 import { useControls } from './useControls.ts'
 import {
@@ -120,14 +122,33 @@ function usePluginToolbar(): HTMLElement | undefined {
  * @param props - composed slot props (runtime share + locale seat).
  * @returns the controls element, or null while the plugins page is closed.
  */
+/** The snapshot used before an inspection has run. Deliberately unknown. */
+const UNKNOWN_TASKS: TaskSnapshot = { known: false, activeTasks: false, scheduledTasks: false }
+
 export function TopRowControls({ t }: TopRowControlsProps) {
   const controls = useControls()
   const toolbar = usePluginToolbar()
   const [panelOpen, setPanelOpen] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [tasks, setTasks] = useState<TaskSnapshot>(UNKNOWN_TASKS)
+  const [checkingTasks, setCheckingTasks] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const panelId = useId()
 
   const { update, restart } = controls.state
+
+  // Restart confirms first, and inspects what would be interrupted at the
+  // moment of asking rather than from a stale snapshot: a task may have started
+  // since the page loaded, and that is precisely the case the warning is for.
+  const requestRestart = useCallback(async (): Promise<void> => {
+    setConfirmOpen(true)
+    setCheckingTasks(true)
+    try {
+      setTasks(await fetchTasks())
+    } finally {
+      setCheckingTasks(false)
+    }
+  }, [])
 
   // Close the panel when clicking outside it: the overlay floats above the
   // whole app, so a stray panel would otherwise cover the conversation.
@@ -198,13 +219,26 @@ export function TopRowControls({ t }: TopRowControlsProps) {
             aria-busy={restart.phase === 'requesting' || restart.phase === 'restarting'}
             title={restartTitle}
             disabled={!controls.canRestart}
-            onClick={() => { controls.onRestartClick() }}
+            onClick={() => { void requestRestart() }}
           >
             <RestartGlyph restart={restart} />
             <span className={css.label}>{t('restartLabel')}</span>
           </button>
         </Tooltip>
       </div>
+
+      {confirmOpen && (
+        <RestartConfirm
+          t={t}
+          tasks={tasks}
+          checking={checkingTasks}
+          onCancel={() => { setConfirmOpen(false) }}
+          onConfirm={() => {
+            setConfirmOpen(false)
+            controls.onRestartClick()
+          }}
+        />
+      )}
 
       {/* The live region is always mounted so screen readers observe its
           updates; it carries the same facts the tooltip shows. */}
@@ -325,4 +359,59 @@ function restartTooltip(restart: RestartState, t: Translate): string {
       : t('restartFailed')
     default: return t('restartConfirmHint')
   }
+}
+
+/**
+ * The pre-restart confirmation, naming any work that would be interrupted.
+ *
+ * The dialog warns on `known === false` as well: "the host could not tell me"
+ * is a reason to ask, not a reason to stay silent. Only a positive, readable
+ * "nothing is running" lets the plain confirmation through.
+ */
+function RestartConfirm({ t, tasks, checking, onCancel, onConfirm }: {
+  readonly t: Translate
+  readonly tasks: TaskSnapshot
+  readonly checking: boolean
+  readonly onCancel: () => void
+  readonly onConfirm: () => void
+}) {
+  // Esc cancels, and focus starts on Cancel so an accidental Enter is safe.
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    cancelRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onCancel()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => { document.removeEventListener('keydown', onKeyDown) }
+  }, [onCancel])
+
+  const warning = t(warningKey(tasks, checking))
+
+  return createPortal(
+    <div className={css.scrim} role="presentation" onClick={onCancel}>
+      <div
+        className={css.dialog}
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={t('restartLabel')}
+        onClick={event => { event.stopPropagation() }}
+      >
+        <div className={css.dialogTitle}>{t('restartConfirmTitle')}</div>
+        <p className={css.dialogBody} data-warn={isWarning(tasks, checking) ? 'true' : undefined}>
+          {warning}
+        </p>
+        <p className={css.dialogNote}>{t('restartConfirmHint')}</p>
+        <div className={css.dialogActions}>
+          <button ref={cancelRef} type="button" className={css.dialogButton} onClick={onCancel}>
+            {t('restartCancel')}
+          </button>
+          <button type="button" className={css.dialogButton} data-primary="true" onClick={onConfirm}>
+            {t('restartConfirm')}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
 }

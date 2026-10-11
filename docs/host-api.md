@@ -48,6 +48,7 @@ query string never participates in matching.
 | `POST` | `/dsh-market/api/updates` | update one plugin |
 | `POST` | `/dsh-market/api/updates/all` | update every updatable plugin |
 | `GET` | `/dsh-market/api/operations` | progress of an update run (`?id=`) |
+| `GET` | `/dsh-market/api/tasks` | whether running work would be interrupted by a restart |
 | `POST` | `/dsh-market/api/restart` | restart dsh |
 
 ### `GET /dsh-market/api/ping`
@@ -142,6 +143,27 @@ Request body `{ "packageName": "dsh-vpn" }` for the single form; `{}` for
 `pending`, `running`, `success`, `failed` or `skipped` (with `error`). An
 unknown id answers `404`. `operationId` is accepted as an alias for `id`.
 Finished operations are retained for the lifetime of the process.
+
+### `GET /dsh-market/api/tasks`
+
+Answers the question the restart confirmation asks: is there work a restart
+would interrupt? Reads the same two services the shell's own quit inspection
+reads (`agents`, `jobs`), so the plugin's dialog and the shell's quit dialog
+agree on what counts as "busy" — an agent that is running or has queued inbox
+entries, or a job that is running or stopping.
+
+```jsonc
+{ "known": true, "activeTasks": true, "scheduledTasks": false }
+```
+
+`known` is `false` when the host cannot inspect (the services are absent, or the
+inspection threw). Callers must treat that as *cannot tell*, never as *idle*:
+the client warns on unknown, because a calm "nothing is running" would be a
+clean bill of health the host never issued.
+
+`scheduledTasks` is always `false` from this plugin. The shell derives it from
+the `workspace/session-activity` waterfall, which is the shell's own extension
+point; a wrong answer there is worse than a conservative one.
 
 ### `POST /dsh-market/api/restart`
 

@@ -122,6 +122,7 @@ describe('route table', () => {
       `${ROUTE_PREFIX}/api/operations`,
       `${ROUTE_PREFIX}/api/ping`,
       `${ROUTE_PREFIX}/api/restart`,
+      `${ROUTE_PREFIX}/api/tasks`,
       `${ROUTE_PREFIX}/api/updates`,
       `${ROUTE_PREFIX}/api/updates/all`,
       `${ROUTE_PREFIX}/api/updates/summary`,
@@ -333,6 +334,31 @@ describe('ping and capabilities', () => {
     expect(body.restart.managedBy).toBe('desktop-host')
     // No refusal means no refusal copy.
     expect(body.restart.reason).toBeUndefined()
+  })
+})
+
+describe('tasks probe', () => {
+  it('reports an unknown host as unknown, not as idle', async () => {
+    // The dialog branches on `known` FIRST. Answering "nothing is running"
+    // when the host cannot tell would drop the warning exactly when it is
+    // needed, so the absent inspector must not look like a clean bill.
+    const routes = mount()
+    const response = await call(find(routes, `${ROUTE_PREFIX}/api/tasks`), request({ url: '/api/tasks' }))
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({ known: false, activeTasks: false })
+  })
+
+  it('reports running work from the inspector', async () => {
+    const routes = mount({ inspect: async () => ({ activeTasks: true, scheduledTasks: false }) })
+    const response = await call(find(routes, `${ROUTE_PREFIX}/api/tasks`), request({ url: '/api/tasks' }))
+    expect(response.body).toMatchObject({ known: true, activeTasks: true })
+  })
+
+  it('downgrades a throwing inspector to unknown rather than failing', async () => {
+    const routes = mount({ inspect: async () => { throw new Error('services are unavailable') } })
+    const response = await call(find(routes, `${ROUTE_PREFIX}/api/tasks`), request({ url: '/api/tasks' }))
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({ known: false })
   })
 })
 

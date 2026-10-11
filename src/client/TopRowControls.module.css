@@ -37,17 +37,24 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  /* 28px matches the plugin page's own toolbar icon button, so the row reads as
-     one set. */
+  /* Matches the height of the plugin page's own toolbar button so the row still
+     reads as one set, while the border and weight set these two apart from it:
+     they are actions, not chrome. */
   min-width: 28px;
   height: 28px;
-  border: none;
-  border-radius: 50%;
-  padding: 0;
-  background: transparent;
+  /* A pill rather than a circle: the labels are text, so a round button would
+     clip them once the sidebar is expanded. */
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 14px;
+  /* Horizontal padding, so the pill grows with its label instead of clipping it. */
+  padding: 0 10px;
+  background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-secondary);
   font: inherit;
   font-size: 12px;
+  /* On the button, not just the label: the collapsed rail renders the glyph
+     with no label at all, and a glyph alone cannot be bold. */
+  font-weight: 600;
   line-height: 1;
   cursor: pointer;
 }
@@ -55,6 +62,7 @@
 .button:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-border-l2);
 }
 
 .button:focus-visible {
@@ -84,6 +92,8 @@
    alone. `title` + aria-label carry the meaning in both cases. */
 .label {
   white-space: nowrap;
+  /* Inherited from `.button`; these are the two controls this plugin adds, and
+     they should be findable at a glance. */
 }
 
 /* Update badge: the updatable count, pinned to the glyph's top-right. */
@@ -285,4 +295,83 @@
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* --- Restart confirmation -------------------------------------------- */
+
+/* The scrim covers the whole window: a restart ends the session, so the
+   decision must not be dismissable by clicking the page behind it. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dsw-alias-bg-mask-drop);
+}
+
+.dialog {
+  box-sizing: border-box;
+  width: min(400px, calc(100vw - 32px));
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+  text-align: left;
+}
+
+.dialogTitle {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dialogBody {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Warnings carry colour, so the sentence is not the only signal. */
+.dialogBody[data-warn='true'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.dialogNote {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialogButton {
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 6px;
+  padding: 5px 14px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dialogButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.dialogButton[data-primary='true'] {
+  border-color: transparent;
+  background: var(--dsw-alias-state-business-primary);
+  color: #fff;
 }

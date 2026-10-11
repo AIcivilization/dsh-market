@@ -451,3 +451,71 @@ export function detectRuntime(
   if (desktopService) return 'desktop'
   return detectDesktopRuntime(argv, env).desktop ? 'desktop' : 'web'
 }
+
+/**
+ * The shape `agents.list()` yields, narrowed to the fields that matter.
+ */
+export interface AgentLike {
+  readonly id: string
+  readonly status?: string
+  readonly inbox?: {
+    readonly nextTurn?: readonly unknown[]
+    readonly nextStep?: readonly unknown[]
+  }
+}
+
+/** The shape `jobs.list()` yields, narrowed to the fields that matter. */
+export interface JobLike {
+  readonly status?: string
+}
+
+/**
+ * Whether live agent state contains work that a restart would interrupt.
+ *
+ * This deliberately re-implements the shell's own `hasDesktopActiveTasks`,
+ * read out of `dsh-desktop-host`: an agent is busy when it is running or has
+ * queued inbox entries, and a job is busy when it is running or stopping.
+ * Inventing a laxer predicate here would produce a confirmation dialog that
+ * stays silent exactly while real work is being killed — the failure this is
+ * meant to prevent — so the shell's conditions are mirrored, not approximated.
+ *
+ * @param agents - the live agent descriptors, as `agents.list()` returns them.
+ * @param listJobs - `jobs.list(agentId)`, also called with `undefined` for the
+ *   unowned pool, which the shell checks alongside each agent: a job with no
+ *   agent still runs and a restart still kills it.
+ * @returns true when at least one agent or job would be interrupted.
+ */
+export function hasActiveTasks(
+  agents: readonly AgentLike[],
+  listJobs: (agentId: string | undefined) => readonly JobLike[],
+): boolean {
+  const busyAgent = agents.some(agent =>
+    agent.status === 'running'
+    || (agent.inbox?.nextTurn?.length ?? 0) > 0
+    || (agent.inbox?.nextStep?.length ?? 0) > 0)
+  if (busyAgent) return true
+  const pools: (string | undefined)[] = [undefined, ...agents.map(agent => agent.id)]
+  return pools.some(id => listJobs(id).some(job => job.status === 'running' || job.status === 'stopping'))
+}
+
+/**
+ * The live task counts, as the shell's quit inspection reports them.
+ *
+ * `activeTasks` is work a restart would interrupt; `scheduledTasks` is armed
+ * reminders that would be lost. Both mirror the shell's own
+ * `installDesktopQuitInspection`, including its caveat that reminders in
+ * sessions never loaded during this run cannot fire and so are not counted.
+ *
+ * @param agents - the live agent descriptors.
+ * @param listJobs - `jobs.list(agentId)`.
+ * @param armedReminders - whether any loaded session exposes an armed
+ *   `schedule` activity; supplied by the caller, which owns the waterfall.
+ * @returns the two flags the confirmation dialog branches on.
+ */
+export function inspectTasks(
+  agents: readonly AgentLike[],
+  listJobs: (agentId: string | undefined) => readonly JobLike[],
+  armedReminders: boolean,
+): { readonly activeTasks: boolean; readonly scheduledTasks: boolean } {
+  return { activeTasks: hasActiveTasks(agents, listJobs), scheduledTasks: armedReminders }
+}

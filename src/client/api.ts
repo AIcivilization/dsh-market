@@ -28,6 +28,8 @@ export const ENDPOINTS = {
   operations: `${API_PREFIX}/operations`,
   /** Restart the DSH host process. */
   restart: `${API_PREFIX}/restart`,
+  /** Live task state, so a restart can warn before interrupting work. */
+  tasks: `${API_PREFIX}/tasks`,
   /** Liveness + process identity; `bootId` changes across a restart. */
   ping: `${API_PREFIX}/ping`,
 } as const
@@ -507,5 +509,45 @@ export async function probeHost(options: RequestOptions = {}): Promise<HostPing>
     return { alive: true, bootId }
   } catch {
     return { alive: false, bootId: undefined }
+  }
+}
+
+
+/**
+ * The task state shown before a restart.
+ *
+ * `known: false` means the host could not answer. The caller must treat that as
+ * "cannot tell" and still confirm — never as "nothing is running", which would
+ * silently drop the warning exactly when it matters.
+ */
+export interface TaskSnapshot {
+  /** Whether the host could inspect at all. */
+  readonly known: boolean
+  /** Whether a restart would interrupt running work. */
+  readonly activeTasks: boolean
+  /** Whether armed reminders would be lost. */
+  readonly scheduledTasks: boolean
+}
+
+/**
+ * Read the live task state.
+ *
+ * Never throws: an unreachable or unreadable host yields `known: false` so the
+ * confirmation still appears.
+ *
+ * @param options - injectable fetch and signal.
+ * @returns the snapshot, or an unknown snapshot when it could not be read.
+ */
+export async function fetchTasks(options: RequestOptions = {}): Promise<TaskSnapshot> {
+  const unknown: TaskSnapshot = { known: false, activeTasks: false, scheduledTasks: false }
+  try {
+    const body = asRecord(await requestJson(ENDPOINTS.tasks, { method: 'GET' }, options)) ?? {}
+    return {
+      known: body['known'] === true,
+      activeTasks: body['activeTasks'] === true,
+      scheduledTasks: body['scheduledTasks'] === true,
+    }
+  } catch {
+    return unknown
   }
 }

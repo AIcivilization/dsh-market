@@ -18,6 +18,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRoutes, ROUTE_PREFIX, type HostRoute } from './host/routes.js'
 import { resolveProfile, type ProfileContextLike } from './host/profile.js'
+import { inspectTasks, type AgentLike, type JobLike } from './host/runtime.js'
 import { buildCapabilities } from './host/capabilities.js'
 
 /** The plugin name, as the loader reports it. */
@@ -51,6 +52,7 @@ export function apply(ctx: Context, config?: Config): void {
     // The desktop shell publishes this service; its presence is the third
     // structural marker that the shell — not this plugin — owns restart.
     const desktopService = ctx.get('desktopProfiles') !== undefined
+    const inspector = createTaskInspector(ctx)
     const routes = profile === null
       ? []
       : createRoutes({
@@ -59,6 +61,7 @@ export function apply(ctx: Context, config?: Config): void {
         packageManager: profile.packageManager,
         startedBundles: profile.startedBundles,
         desktopService,
+        ...(inspector === undefined ? {} : { inspect: inspector }),
       })
     const webServer = hostCtx.get('webServer') as WebServerLike | undefined
     if (webServer === undefined) return
@@ -90,6 +93,7 @@ export const API = {
   updatesSummary: { method: 'GET', path: `${ROUTE_PREFIX}/api/updates/summary` },
   updates: { method: 'POST', path: `${ROUTE_PREFIX}/api/updates` },
   updatesAll: { method: 'POST', path: `${ROUTE_PREFIX}/api/updates/all` },
+  tasks: { method: 'GET', path: `${ROUTE_PREFIX}/api/tasks` },
   operations: { method: 'GET', path: `${ROUTE_PREFIX}/api/operations` },
   restart: { method: 'POST', path: `${ROUTE_PREFIX}/api/restart` },
 } as const
@@ -98,3 +102,49 @@ export const API = {
 export { createRoutes, ROUTE_PREFIX, buildCapabilities }
 export type { HostRoute }
 export type RouteHandler = (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
+
+/**
+ * The live task inspector backing `GET /api/tasks`.
+ *
+ * Reads the SAME two services the shell's own quit inspection reads — `agents`
+ * and `jobs`, via `inspectTasks` — so the dialog shown before a restart agrees
+ * with the one the shell shows before a quit.
+ *
+ * `scheduledTasks` is hard-coded false here. The shell derives it from the
+ * `workspace/session-activity` waterfall, which is the shell's own extension
+ * point: hijacking it to advertise armed reminders would be reaching into host
+ * internals this plugin does not own, and a wrong answer is worse than a
+ * conservative one. `activeTasks` — the flag the user actually asked about,
+ * because it is the work that gets *interrupted* — is fully implemented.
+ *
+ * When a service is missing the inspection reports unknown, never "idle".
+ *
+ * @param ctx - the plugin's context.
+ * @returns an inspector, or undefined when the host cannot answer.
+ */
+function createTaskInspector(ctx: Context): (() => Promise<{ activeTasks: boolean; scheduledTasks: boolean }>) | undefined {
+  const read = (): { agents: AgentsLike; jobs: JobsLike } | undefined => {
+    const agents = ctx.get('agents') as AgentsLike | undefined
+    const jobs = ctx.get('jobs') as JobsLike | undefined
+    if (agents === undefined || jobs === undefined) return undefined
+    return { agents, jobs }
+  }
+  if (read() === undefined) return undefined
+  return async () => {
+    const live = read()
+    if (live === undefined) throw new Error('task services are unavailable')
+    const liveAgents = live.agents.list()
+    const jobs = live.jobs
+    return inspectTasks(liveAgents, id => jobs.list(id), false)
+  }
+}
+
+/** The `agents` service, narrowed to what the inspector uses. */
+interface AgentsLike {
+  list(): readonly AgentLike[]
+}
+
+/** The `jobs` service, narrowed to what the inspector uses. */
+interface JobsLike {
+  list(agentId: string | undefined): readonly JobLike[]
+}

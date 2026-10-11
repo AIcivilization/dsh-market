@@ -118,6 +118,14 @@ export interface RouteDeps {
   readonly run?: typeof runCommand
   /** The restart scheduler, injectable so tests never kill their runner. */
   readonly restart?: typeof scheduleRestart
+  /**
+   * Live task state, for the restart confirmation.
+   *
+   * Absent means "cannot tell", which the route reports as `known: false`
+   * rather than as "nothing is running": claiming the latter without evidence
+   * would let the dialog stay silent while it kills real work.
+   */
+  readonly inspect?: () => Promise<{ readonly activeTasks: boolean; readonly scheduledTasks: boolean }>
   /** The clock, injectable for tests. */
   readonly now?: () => number
 }
@@ -352,6 +360,29 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
           return
         }
         sendJson(response, 200, view)
+      },
+    },
+    // ------------------------------------------------------------ task probe
+    {
+      kind: 'exact',
+      path: `${prefix}/api/tasks`,
+      handler: async (request, response) => {
+        if (request.method !== 'GET') return methodNotAllowed(response, 'GET')
+        if (!sameOriginRead(request)) return sendJson(response, 403, { error: REFUSED, reason: refusalReason(request) })
+        // A missing inspector is reported as unknown rather than as idle. The
+        // dialog branches on `known` first, so this can never silently claim
+        // there is nothing to lose.
+        if (deps.inspect === undefined) {
+          sendJson(response, 200, { known: false, activeTasks: false, scheduledTasks: false })
+          return
+        }
+        try {
+          const tasks = await deps.inspect()
+          sendJson(response, 200, { known: true, ...tasks })
+        } catch {
+          // An inspection that throws is still "cannot tell", not "idle".
+          sendJson(response, 200, { known: false, activeTasks: false, scheduledTasks: false })
+        }
       },
     },
     // --------------------------------------------------------------- restart

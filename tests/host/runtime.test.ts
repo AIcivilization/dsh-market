@@ -22,6 +22,8 @@ import {
   detectRuntime,
   detectSupervisor,
   isDesktopHostToken,
+  hasActiveTasks,
+  inspectTasks,
   isElectronParent,
   restartCapability,
 } from '../../src/host/runtime.js'
@@ -353,5 +355,54 @@ describe('desktop relaunch', () => {
     const plan = restartPlan(false)
     expect(plan.desktop).toBe(false)
     expect(plan.launch.file).not.toBe('open')
+  })
+})
+
+/**
+ * The interruption predicate.
+ *
+ * Mirrors the shell's own `hasDesktopActiveTasks`. Every branch is asserted
+ * because a laxer version here would keep the confirmation dialog silent while
+ * a restart kills real work.
+ */
+describe('hasActiveTasks', () => {
+  const noJobs = (): readonly { status?: string }[] => []
+
+  it('is idle with no agents and no jobs', () => {
+    expect(hasActiveTasks([], noJobs)).toBe(false)
+  })
+
+  it('counts a running agent', () => {
+    expect(hasActiveTasks([{ id: 'a', status: 'running' }], noJobs)).toBe(true)
+  })
+
+  it('counts queued work on an otherwise idle agent', () => {
+    // An agent between turns still has claimed work; restarting drops it.
+    expect(hasActiveTasks([{ id: 'a', status: 'idle', inbox: { nextTurn: [{}] } }], noJobs)).toBe(true)
+    expect(hasActiveTasks([{ id: 'a', status: 'idle', inbox: { nextStep: [{}] } }], noJobs)).toBe(true)
+  })
+
+  it('ignores an idle agent with an empty inbox', () => {
+    expect(hasActiveTasks([{ id: 'a', status: 'idle', inbox: { nextTurn: [], nextStep: [] } }], noJobs)).toBe(false)
+  })
+
+  it('counts a running job, including in the unowned pool', () => {
+    // A job with no agent still runs, and a restart still kills it — this is
+    // why `undefined` is queried alongside every agent id.
+    const jobs = (id: string | undefined): readonly { status?: string }[] =>
+      id === undefined ? [{ status: 'running' }] : []
+    expect(hasActiveTasks([], jobs)).toBe(true)
+  })
+
+  it('counts a stopping job but not a finished one', () => {
+    expect(hasActiveTasks([], () => [{ status: 'stopping' }])).toBe(true)
+    expect(hasActiveTasks([], () => [{ status: 'done' }, { status: 'failed' }])).toBe(false)
+  })
+
+  it('reports the two flags the dialog branches on', () => {
+    expect(inspectTasks([{ id: 'a', status: 'running' }], noJobs, false))
+      .toEqual({ activeTasks: true, scheduledTasks: false })
+    expect(inspectTasks([], noJobs, true))
+      .toEqual({ activeTasks: false, scheduledTasks: true })
   })
 })
