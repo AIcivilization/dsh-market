@@ -1,0 +1,289 @@
+/**
+ * Runtime and restart-capability detection.
+ *
+ * The fixture values are not idealized inputs: the `REAL_DESKTOP_ARGV` and
+ * `REAL_DESKTOP_ENV` constants below are the ACTUAL argv and environment of a
+ * live `dsh-desktop-host` child on macOS, read off the running Electron app.
+ * The idealized version of that launch was what got the detection wrong the
+ * first time — an anchored `…dsh-desktop-host.js$` test looks correct against a
+ * tidy example and matches nothing against the real thing, where the host entry
+ * sits at a path segment followed by `/lib/index.js`.
+ *
+ * Both failure directions matter and are asserted here: a false negative kills
+ * the process under the desktop shell, and a false positive takes the restart
+ * button away from every plain `dsh web` user.
+ */
+
+import { describe, expect, it } from 'vitest'
+import {
+  DESKTOP_SIGNAL_THRESHOLD,
+  detectDesktopRuntime,
+  detectDebugger,
+  detectRuntime,
+  detectSupervisor,
+  isDesktopHostToken,
+  isElectronParent,
+  restartCapability,
+} from '../../src/host/runtime.js'
+
+/**
+ * The real argv of the `dsh-desktop-host` child of the Electron app
+ * (pid 3660 on the machine this was developed on).
+ */
+const REAL_DESKTOP_ARGV = [
+  '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness',
+  '--expose-internals',
+  '/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js',
+  '/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh',
+  '/Users/wf/.dsh/profiles/desktop',
+  '/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js',
+]
+
+/**
+ * The real environment of that process, filtered to the DSH/Electron-relevant
+ * entries. Note what is NOT here: there is no `DSH_DESKTOP_*` variable at all
+ * on this machine, which is why that probe cannot be the primary signal.
+ */
+const REAL_DESKTOP_ENV = {
+  ELECTRON_RUN_AS_NODE: '1',
+  DSH_CLIENT_VERSION: '0.2.0-rc.2',
+} as NodeJS.ProcessEnv
+
+/** The parent is the Electron binary, not a shell. */
+const REAL_DESKTOP_PARENT_COMM = '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness'
+const REAL_DESKTOP_EXEC_PATH = '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/primary-runtime'
+
+/** A plain `dsh web` launched from a terminal. */
+const WEB_ARGV = ['/usr/local/bin/node', '/Users/wf/dsh/deepseek-harness/bin.js', 'web', '--profile', 'desktop']
+const WEB_ENV = { PATH: '/usr/bin:/bin', HOME: '/Users/wf' } as NodeJS.ProcessEnv
+const WEB_PARENT_COMM = '/bin/zsh'
+
+/** Read a parent command from a fixed table, so tests never shell out. */
+const parentReader = (comm: string | null) => (_pid: number): string | null => comm
+
+/** The desktop options that reproduce the live machine. */
+const onDesktopMachine = {
+  argv: REAL_DESKTOP_ARGV,
+  env: REAL_DESKTOP_ENV,
+  ppid: 3649,
+  execPath: REAL_DESKTOP_EXEC_PATH,
+  parentComm: parentReader(REAL_DESKTOP_PARENT_COMM),
+}
+
+const onWebMachine = {
+  argv: WEB_ARGV,
+  env: WEB_ENV,
+  ppid: 91_000,
+  execPath: '/usr/local/bin/node',
+  parentComm: parentReader(WEB_PARENT_COMM),
+}
+
+describe('isDesktopHostToken — the real macOS layout', () => {
+  it('matches the real desktop-host entry, which ends at /lib/index.js', () => {
+    // The exact case the anchored `…dsh-desktop-host.js$` pattern missed.
+    expect(isDesktopHostToken(REAL_DESKTOP_ARGV[2]!)).toBe(true)
+    expect(isDesktopHostToken(REAL_DESKTOP_ARGV[5]!)).toBe(true)
+  })
+
+  it('matches every shape of the entry', () => {
+    expect(isDesktopHostToken('dsh-desktop-host')).toBe(true)
+    expect(isDesktopHostToken('/x/node_modules/dsh-desktop-host/lib/index.js')).toBe(true)
+    expect(isDesktopHostToken('/x/dsh-desktop-host.js')).toBe(true)
+    expect(isDesktopHostToken('/x/dsh-desktop-host.mjs')).toBe(true)
+  })
+
+  it('matches a Windows layout too', () => {
+    expect(isDesktopHostToken(String.raw`C:\x\node_modules\dsh-desktop-host\lib\index.js`)).toBe(true)
+  })
+
+  it('rejects a path that merely CONTAINS the words', () => {
+    // The false positive that would cost every plain `dsh web` user their
+    // button: a filename that happens to mention the host is not the host.
+    expect(isDesktopHostToken('/tmp/dsh-desktop-host-notes.md')).toBe(false)
+    expect(isDesktopHostToken('/x/dsh-desktop-hosts/lib/index.js')).toBe(false)
+  })
+
+  it('rejects a plain dsh web argv', () => {
+    expect(WEB_ARGV.filter(isDesktopHostToken)).toHaveLength(0)
+  })
+})
+
+describe('detectDesktopRuntime — signals and threshold', () => {
+  it('detects the live desktop machine', () => {
+    const detection = detectDesktopRuntime(REAL_DESKTOP_ARGV, REAL_DESKTOP_ENV, {
+      ppid: 3649,
+      execPath: REAL_DESKTOP_EXEC_PATH,
+      parentComm: parentReader(REAL_DESKTOP_PARENT_COMM),
+    })
+    expect(detection.desktop).toBe(true)
+    const fired = detection.signals.filter(signal => signal.fired).map(signal => signal.id)
+    expect(fired).toContain('argv-segment')
+  })
+
+  it('does NOT fire the env probe on the real machine, and says so', () => {
+    // Documented behaviour, not an oversight: there is no DSH_DESKTOP_*
+    // variable on the real launch, so this branch is inert there and the
+    // verdict must not depend on it.
+    const detection = detectDesktopRuntime(REAL_DESKTOP_ARGV, REAL_DESKTOP_ENV, {
+      ppid: 3649,
+      execPath: REAL_DESKTOP_EXEC_PATH,
+      parentComm: parentReader(REAL_DESKTOP_PARENT_COMM),
+    })
+    const envSignal = detection.signals.find(signal => signal.id === 'desktop-env')
+    expect(envSignal?.fired).toBe(false)
+  })
+
+  it('requires two signals, so argv alone is not enough', () => {
+    // Only the argv signal fires: below threshold, so the verdict stays web.
+    // This is what keeps a future Electron launch that passes the entry
+    // differently from silently flipping the answer either way.
+    const detection = detectDesktopRuntime(REAL_DESKTOP_ARGV, {} as NodeJS.ProcessEnv, {
+      ppid: 91_000,
+      execPath: '/usr/local/bin/node',
+      parentComm: parentReader('/bin/zsh'),
+    })
+    expect(detection.signals.filter(signal => signal.fired)).toHaveLength(1)
+    expect(detection.desktop).toBe(false)
+    expect(detection.reason).toContain('below the threshold')
+  })
+
+  it('requires two signals, so Electron env alone is not enough', () => {
+    // ELECTRON_RUN_AS_NODE is inheritable, so on its own it proves nothing.
+    const detection = detectDesktopRuntime(WEB_ARGV, { ELECTRON_RUN_AS_NODE: '1' } as NodeJS.ProcessEnv, {
+      ppid: 91_000,
+      execPath: '/usr/local/bin/node',
+      parentComm: parentReader('/bin/zsh'),
+    })
+    expect(detection.desktop).toBe(false)
+  })
+
+  it('accepts the parent-process signal combined with Electron env', () => {
+    const detection = detectDesktopRuntime(WEB_ARGV, { ELECTRON_RUN_AS_NODE: '1' } as NodeJS.ProcessEnv, {
+      ppid: 3649,
+      execPath: '/usr/local/bin/node',
+      parentComm: parentReader(REAL_DESKTOP_PARENT_COMM),
+    })
+    expect(detection.desktop).toBe(true)
+  })
+
+  it('treats the published desktop service as a signal needing no guessing', () => {
+    const detection = detectDesktopRuntime(WEB_ARGV, WEB_ENV, {
+      ppid: 91_000,
+      execPath: '/usr/local/bin/node',
+      parentComm: parentReader('/bin/zsh'),
+      desktopService: true,
+    })
+    // One signal only — the service — which is deliberately NOT enough on its
+    // own. `restartCapability` short-circuits on that signal separately.
+    expect(detection.signals.filter(signal => signal.fired)).toHaveLength(1)
+  })
+})
+
+describe('detectRuntime', () => {
+  it('reports desktop for the live machine', () => {
+    expect(detectRuntime(REAL_DESKTOP_ARGV, REAL_DESKTOP_ENV, true)).toBe('desktop')
+  })
+
+  it('reports web for a plain terminal launch', () => {
+    expect(detectRuntime(WEB_ARGV, WEB_ENV, false)).toBe('web')
+  })
+})
+
+describe('isElectronParent', () => {
+  it('recognizes the macOS app bundle parent', () => {
+    expect(isElectronParent(REAL_DESKTOP_PARENT_COMM)).toBe(true)
+  })
+
+  it('does not mistake a shell for the app', () => {
+    expect(isElectronParent('/bin/zsh')).toBe(false)
+    expect(isElectronParent('/usr/local/bin/node')).toBe(false)
+    expect(isElectronParent(null)).toBe(false)
+  })
+})
+
+describe('detectSupervisor', () => {
+  it('requires both the systemd marker and a matching parent', () => {
+    // INVOCATION_ID is inherited, so on its own it must not count: a terminal
+    // inside a systemd session would otherwise be treated as supervised.
+    expect(detectSupervisor({ INVOCATION_ID: 'abc' } as NodeJS.ProcessEnv, 4242, parentReader('/bin/bash'))).toBeNull()
+    expect(detectSupervisor({ INVOCATION_ID: 'abc' } as NodeJS.ProcessEnv, 1, parentReader(null))).toBe('systemd')
+    expect(detectSupervisor({ INVOCATION_ID: 'abc' } as NodeJS.ProcessEnv, 4242, parentReader('systemd'))).toBe('systemd')
+  })
+
+  it('matches systemd when ps prints a full path (macOS form)', () => {
+    expect(detectSupervisor({ JOURNAL_STREAM: '8:1' } as NodeJS.ProcessEnv, 500, parentReader('/usr/lib/systemd'))).toBe('systemd')
+  })
+
+  it('reports no supervisor without the systemd marker', () => {
+    expect(detectSupervisor(WEB_ENV, 4242, parentReader('systemd'))).toBeNull()
+  })
+})
+
+describe('detectDebugger', () => {
+  it('detects an inspector URL', () => {
+    expect(detectDebugger('ws://127.0.0.1:9229/uuid', [], '')).toBe(true)
+  })
+
+  it('detects inspect flags in execArgv and NODE_OPTIONS', () => {
+    expect(detectDebugger(undefined, ['--inspect'], '')).toBe(true)
+    expect(detectDebugger(undefined, [], '--inspect-brk=9229')).toBe(true)
+    expect(detectDebugger(undefined, ['--inspect-wait'], '')).toBe(true)
+  })
+
+  it('does not false-positive on a script path containing "inspect"', () => {
+    expect(detectDebugger(undefined, [], '')).toBe(false)
+    expect(detectDebugger('', ['/usr/lib/inspect-tool.js'], '/app/inspect-tool.js')).toBe(false)
+  })
+})
+
+describe('restartCapability', () => {
+  it('refuses on the desktop host and names the actionable step', () => {
+    const capability = restartCapability(onDesktopMachine)
+    expect(capability.supported).toBe(false)
+    expect(capability.managedBy).toBe('desktop-host')
+    expect(capability.reason).toContain('DSH Desktop')
+    // Actionable copy, not a bare error code.
+    expect(capability.reason).toMatch(/Quit and reopen|退出并重新打开/)
+  })
+
+  it('allows a plain web host', () => {
+    const capability = restartCapability(onWebMachine)
+    expect(capability.supported).toBe(true)
+    expect(capability.managedBy).toBe('market')
+    expect(capability.reason).toBeNull()
+  })
+
+  it('refuses under a supervisor, whichever way the desktop question went', () => {
+    const capability = restartCapability({
+      ...onWebMachine,
+      env: { ...WEB_ENV, INVOCATION_ID: 'abc' },
+      ppid: 1,
+      parentComm: parentReader(null),
+    })
+    expect(capability.supported).toBe(false)
+    expect(capability.managedBy).toBe('supervisor')
+    expect(capability.supervisor).toBe('systemd')
+  })
+
+  it('prioritizes the desktop verdict over everything else', () => {
+    const capability = restartCapability({
+      ...onDesktopMachine,
+      env: { ...REAL_DESKTOP_ENV, INVOCATION_ID: 'abc' },
+      ppid: 1,
+      parentComm: parentReader(null),
+    })
+    expect(capability.managedBy).toBe('desktop-host')
+  })
+
+  it('refuses while a debugger is attached', () => {
+    const capability = restartCapability({ ...onWebMachine, debuggerAttached: true })
+    expect(capability.supported).toBe(false)
+    expect(capability.managedBy).toBe('operator')
+  })
+
+  it('reports the evidence behind the verdict', () => {
+    const capability = restartCapability(onDesktopMachine)
+    expect(capability.desktopSignals.filter(signal => signal.fired).length).toBeGreaterThanOrEqual(DESKTOP_SIGNAL_THRESHOLD)
+    expect(capability.runtimeReason).toContain('signals indicate the desktop shell')
+  })
+})

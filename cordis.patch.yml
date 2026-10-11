@@ -1,0 +1,14 @@
+# dsh bundle patch: inserts this plugin into a profile's layer stack.
+#
+# `dsh plugin --profile <p> add <spec>` runs pnpm in the profile directory and
+# then reconciles `dsh.profile.bundles`: a dependency whose installed manifest
+# declares `dsh.bundle.patch` (see package.json) is appended as a profile layer.
+# This file is that layer's body — it names the module the Loader must import.
+#
+# `name` must be the package name so Node resolution finds this package from the
+# profile directory. `id` is the layer row's stable identity in the composed
+# profile; it must be unique within the profile and must match the store id the
+# plugin's own effects key on.
+- insert:
+    - id: dsh-market
+      name: 'dsh-market'

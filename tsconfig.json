@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "lib": ["ES2024"],
+    "types": ["node"],
+    // tsdown owns ALL runtime JavaScript (`lib/index.js` is the bundle the
+    // profile Loader imports; nothing ever imports `lib/types/**/*.js`).
+    // Without this, tsc also emits a redundant parallel .js tree — ~26 dead
+    // files in the published tarball, and a second runtime copy of the host
+    // half that can drift from the bundle. Declaration-only keeps the type
+    // surface (lib/types/index.d.ts) and nothing else.
+    "emitDeclarationOnly": true,
+    "sourceMap": false,
+    // The map that ships with the bundle is tsdown's, composed from these
+    // declaration maps' sources; a second in-place .js.map would point at files
+    // that no longer exist.
+    "declarationMap": true,
+    "paths": {
+      "@deepseek-ai/cordis": ["./node_modules/@deepseek-ai/cordis/lib/types/index.d.ts"]
+    }
+  },
+  "include": ["src/index.ts", "src/host/**/*.ts"]
+}

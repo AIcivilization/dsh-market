@@ -1,0 +1,37 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // The client half ships as a tsdown bundle (client/client.js), never as tsc
+    // output. Emitting would collide with tsconfig.json's `lib/types` tree from a
+    // different rootDir and leave a stale mixed layout, so this config is
+    // typecheck-only by construction.
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "src",
+    "outDir": "lib/types-client",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": [],
+    "paths": {
+      "@deepseek-ai/cordis": ["./node_modules/@deepseek-ai/cordis/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives": [
+        "./node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-ui-slots": [
+        "./node_modules/@deepseek-ai/dsh-client-ui-slots/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-ui-theme": [
+        "./node_modules/@deepseek-ai/dsh-client-ui-theme/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-locale": [
+        "./node_modules/@deepseek-ai/dsh-client-locale/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-runtime": [
+        "./node_modules/@deepseek-ai/dsh-client-runtime/lib/types/index.d.ts"
+      ]
+    }
+  },
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "src/client/**/*.d.ts"]
+}
