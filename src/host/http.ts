@@ -98,17 +98,33 @@ export function sameOriginRead(request: IncomingMessage): boolean {
 }
 
 /**
- * The fence for mutating routes — reads plus a mandatory, matching `Origin`.
+ * The fence for mutating routes — reads plus an `Origin` that must check out.
  *
- * Stricter than {@link sameOriginRead} in exactly one way: the `Origin`
- * header must be present and must match `Host`. Every browser sends `Origin`
- * on a POST, so its absence means the caller is not the page this API is
- * for.
+ * A browser always sends `Origin` on a POST, so for a browser this is the read
+ * fence plus a matching `Origin`.
+ *
+ * The desktop shell is the exception, and it is why this cannot simply demand
+ * the header. Its renderer runs on the custom `dsh-app://app` scheme and its
+ * API calls go through the shell's protocol handler, whose `forwardWebRequest`
+ * (dsh-desktop-host, verified) deliberately DELETES `origin`, `host`,
+ * `cookie`, and `sec-fetch-site` before re-issuing the request to the loopback
+ * host. So a legitimate desktop request arrives with no `Origin` at all, and
+ * demanding one refuses every write the desktop app makes — which is exactly
+ * what happened.
+ *
+ * The absent-`Origin` case is therefore accepted only behind the full read
+ * fence, which already proves the request came from this machine's loopback
+ * authority. That is the forwarder's signature and nothing more: a cross-site
+ * page cannot reach a loopback socket as a loopback peer while claiming a
+ * loopback `Host`, and any request that DOES carry an `Origin` still has to
+ * match `Host`, so a real browser CSRF is unaffected.
  */
 export function sameOriginMutation(request: IncomingMessage): boolean {
   if (!sameOriginRead(request)) return false
   const origin = request.headers.origin
-  if (origin === undefined) return false
+  // No `Origin`: the desktop shell's forwarder, already fenced by the read
+  // guard. A browser cannot take this path — it always sends the header.
+  if (origin === undefined) return true
   try {
     const parsed = new URL(origin)
     return (parsed.protocol === 'http:' || parsed.protocol === 'https:')

@@ -181,6 +181,21 @@ helper that waits for the port to free, relaunches exactly the invocation that
 booted this process, waits for the port to answer continuously for 8s, and only
 then stops this process.
 
+## Why a write carries no `Origin` from the desktop app
+
+The desktop shell renders its page on the custom `dsh-app://app` scheme, and
+that page's API calls are re-issued server-side by the shell's protocol handler.
+Its `forwardWebRequest` **deletes `origin`, `host`, `cookie`, and
+`sec-fetch-site`** before forwarding to the loopback host, then sets the host
+cookie itself.
+
+So a legitimate desktop request arrives with no `Origin` at all. Requiring the
+header on mutations refused every write the desktop app made (403), which is
+what the restart button surfaced. Mutations now accept an absent `Origin` only
+behind the full read fence — loopback peer and loopback authority — which is
+exactly the forwarder's signature. A browser always sends `Origin`, so a
+cross-site request still has to match `Host` and is still refused.
+
 ## Guard
 
 Every route runs the same guard before doing anything:

@@ -52,6 +52,10 @@ const REFUSED = '这个请求不是从本机页面发起的，已拒绝。 / Thi
  * entirely the wrong direction. Naming the condition costs nothing and makes
  * the next occurrence diagnosable from the response alone.
  *
+ * `no-origin` is reported only for reads. On a mutation an absent `Origin` is
+ * the desktop shell's forwarder, which is legitimate — see
+ * `sameOriginMutation` — so it never reaches here as a refusal.
+ *
  * @param request - the request that was refused.
  * @returns a short slug: `not-loopback`, `forwarded`, `bad-authority`,
  *   `cross-site`, `no-origin`, `bad-origin` or `origin-mismatch`.

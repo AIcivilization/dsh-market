@@ -173,13 +173,48 @@ describe('the guard', () => {
     expect(response.status).toBe(403)
   })
 
-  it('refuses a mutation with no Origin', async () => {
+  it('accepts a mutation with no Origin, which is how the desktop shell asks', async () => {
+    // dsh-desktop-host's forwardWebRequest deletes origin/host/cookie/
+    // sec-fetch-site before re-issuing the page's request to loopback, so this
+    // header-less shape IS the desktop app. Demanding an Origin here refused
+    // every write the desktop made.
     const routes = mount()
     const response = await call(
       find(routes, `${ROUTE_PREFIX}/api/updates/all`),
       request({ method: 'POST' }),
     )
+    expect(response.status).not.toBe(403)
+  })
+
+  it('still refuses a no-Origin mutation from a NON-loopback peer', async () => {
+    // The forwarder's signature is "loopback peer AND loopback authority". Drop
+    // either half and it is just an unauthenticated write.
+    const routes = mount()
+    const response = await call(
+      find(routes, `${ROUTE_PREFIX}/api/updates/all`),
+      request({ method: 'POST', remoteAddress: '10.1.2.3' }),
+    )
     expect(response.status).toBe(403)
+  })
+
+  it('still refuses a no-Origin mutation that claims a non-loopback Host', async () => {
+    const routes = mount()
+    const response = await call(
+      find(routes, `${ROUTE_PREFIX}/api/updates/all`),
+      request({ method: 'POST', host: 'evil.example.com' }),
+    )
+    expect(response.status).toBe(403)
+  })
+
+  it('still refuses a presented Origin that does not match Host', async () => {
+    // The case a real cross-site page would produce, and it stays rejected.
+    const routes = mount()
+    const response = await call(
+      find(routes, `${ROUTE_PREFIX}/api/updates/all`),
+      request({ method: 'POST', origin: 'https://evil.example.com' }),
+    )
+    expect(response.status).toBe(403)
+    expect((response.body as { reason?: string }).reason).toBe('origin-mismatch')
   })
 
   it('names which guard condition refused the request', async () => {
@@ -187,11 +222,11 @@ describe('the guard', () => {
     // said "not from this machine's page" while the real cause was a stale
     // server. The slug makes the condition readable from the response alone.
     const routes = mount()
-    const noOrigin = await call(
+    const nonLoopback = await call(
       find(routes, `${ROUTE_PREFIX}/api/updates/all`),
-      request({ method: 'POST' }),
+      request({ method: 'POST', remoteAddress: '10.1.2.3' }),
     )
-    expect((noOrigin.body as { reason?: string }).reason).toBe('no-origin')
+    expect((nonLoopback.body as { reason?: string }).reason).toBe('not-loopback')
 
     const mismatch = await call(
       find(routes, `${ROUTE_PREFIX}/api/updates/all`),
