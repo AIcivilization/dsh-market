@@ -266,6 +266,22 @@ describe('requestRestart', () => {
     })
   })
 
+  it('reports a 403 refusal as a decision, with the host sentence', async () => {
+    // The same-origin fence answers 403 with an `error` sentence just like the
+    // 409 refusals do. Handling only 409 threw the 403 as a raw error, so the
+    // user saw an exception instead of the host's explanation.
+    const { fetchImpl } = createFetchStub([json(403, {
+      error: "This request did not come from this machine's page and was refused.",
+      reason: 'no-origin',
+    })])
+    const outcome = await requestRestart({ fetchImpl })
+
+    expect(outcome).toEqual({
+      accepted: false,
+      reason: "This request did not come from this machine's page and was refused.",
+    })
+  })
+
   it('keeps the machine token on the error, not in the rendered reason', async () => {
     // Both fields are carried, but on separate properties, so a future caller
     // can branch on the slug without ever rendering it.

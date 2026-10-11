@@ -181,6 +181,40 @@ describe('the guard', () => {
     expect(response.status).toBe(403)
   })
 
+  it('names which guard condition refused the request', async () => {
+    // A bare 403 sent one investigation in the wrong direction: the message
+    // said "not from this machine's page" while the real cause was a stale
+    // server. The slug makes the condition readable from the response alone.
+    const routes = mount()
+    const noOrigin = await call(
+      find(routes, `${ROUTE_PREFIX}/api/updates/all`),
+      request({ method: 'POST' }),
+    )
+    expect((noOrigin.body as { reason?: string }).reason).toBe('no-origin')
+
+    const mismatch = await call(
+      find(routes, `${ROUTE_PREFIX}/api/updates/all`),
+      request({ method: 'POST', origin: 'http://attacker.test' }),
+    )
+    expect((mismatch.body as { reason?: string }).reason).toBe('origin-mismatch')
+  })
+
+  it('answers a browser-shaped same-origin POST, Origin included', async () => {
+    // The exact headers Chrome was observed sending on a same-origin POST:
+    // a relative fetch DOES carry Origin, contrary to what one might assume
+    // from its "same-origin requests omit Origin" folklore.
+    const routes = mount({ restart: () => ({ pid: 1, helperPid: 2, logOut: '', logErr: '', desktop: true }) })
+    const response = await call(
+      find(routes, `${ROUTE_PREFIX}/api/restart`),
+      request({
+        method: 'POST',
+        origin: 'http://127.0.0.1:19387',
+        headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' },
+      }),
+    )
+    expect(response.status).toBe(202)
+  })
+
   it('refuses a mutation whose Origin does not match Host', async () => {
     const routes = mount()
     const response = await call(

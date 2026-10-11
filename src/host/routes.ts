@@ -16,6 +16,9 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
+  hasForwardingHeaders,
+  loopbackAuthority,
+  loopbackPeer,
   methodNotAllowed,
   readJsonObject,
   sameOriginMutation,
@@ -38,6 +41,34 @@ export const CHECK_TTL_MS = 60 * 1000
 
 /** Text of the last-resort answer to a request that failed the guard. */
 const REFUSED = '这个请求不是从本机页面发起的，已拒绝。 / This request did not come from this machine\'s page and was refused.'
+
+/**
+ * Why a request failed the same-origin guard, as a machine token.
+ *
+ * The guard has four independent conditions and the single `REFUSED` sentence
+ * covers all of them. When this went wrong in practice the message pointed at
+ * the page — "this did not come from this machine's page" — while the real
+ * cause was a stale server still refusing, which sent the investigation in
+ * entirely the wrong direction. Naming the condition costs nothing and makes
+ * the next occurrence diagnosable from the response alone.
+ *
+ * @param request - the request that was refused.
+ * @returns a short slug: `not-loopback`, `forwarded`, `bad-authority`,
+ *   `cross-site`, `no-origin`, `bad-origin` or `origin-mismatch`.
+ */
+export function refusalReason(request: IncomingMessage): string {
+  if (!loopbackPeer(request)) return 'not-loopback'
+  if (hasForwardingHeaders(request)) return 'forwarded'
+  if (!loopbackAuthority(request.headers.host)) return 'bad-authority'
+  if (request.headers['sec-fetch-site'] === 'cross-site') return 'cross-site'
+  const origin = request.headers.origin
+  if (origin === undefined) return 'no-origin'
+  try {
+    return new URL(origin).host === request.headers.host ? 'ok' : 'origin-mismatch'
+  } catch {
+    return 'bad-origin'
+  }
+}
 
 /**
  * Map an internal row onto the wire shape.
@@ -198,7 +229,7 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
       path: `${prefix}/api/ping`,
       handler: (request, response) => {
         if (request.method !== 'GET') return methodNotAllowed(response, 'GET')
-        if (!sameOriginRead(request)) return sendJson(response, 403, { error: REFUSED })
+        if (!sameOriginRead(request)) return sendJson(response, 403, { error: REFUSED, reason: refusalReason(request) })
         sendJson(response, 200, { ok: true, bootId, uptimeMs: now() - startedAt })
       },
     },
@@ -208,7 +239,7 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
       path: `${prefix}/api/capabilities`,
       handler: (request, response) => {
         if (request.method !== 'GET') return methodNotAllowed(response, 'GET')
-        if (!sameOriginRead(request)) return sendJson(response, 403, { error: REFUSED })
+        if (!sameOriginRead(request)) return sendJson(response, 403, { error: REFUSED, reason: refusalReason(request) })
         sendJson(response, 200, capabilities())
       },
     },
@@ -218,7 +249,7 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
       path: `${prefix}/api/updates/summary`,
       handler: async (request, response) => {
         if (request.method !== 'GET') return methodNotAllowed(response, 'GET')
-        if (!sameOriginRead(request)) return sendJson(response, 403, { error: REFUSED })
+        if (!sameOriginRead(request)) return sendJson(response, 403, { error: REFUSED, reason: refusalReason(request) })
         const force = new URL(request.url ?? '/', 'http://localhost').searchParams.get('force') === '1'
         try {
           const summary = await scan(force)
@@ -251,7 +282,7 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
       path: `${prefix}/api/updates`,
       handler: async (request, response) => {
         if (request.method !== 'POST') return methodNotAllowed(response, 'POST')
-        if (!sameOriginMutation(request)) return sendJson(response, 403, { error: REFUSED })
+        if (!sameOriginMutation(request)) return sendJson(response, 403, { error: REFUSED, reason: refusalReason(request) })
         const body = await readJsonObject(request)
         const packageName = body?.['packageName']
         if (typeof packageName !== 'string' || packageName.trim() === '') {
@@ -284,7 +315,7 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
       path: `${prefix}/api/updates/all`,
       handler: async (request, response) => {
         if (request.method !== 'POST') return methodNotAllowed(response, 'POST')
-        if (!sameOriginMutation(request)) return sendJson(response, 403, { error: REFUSED })
+        if (!sameOriginMutation(request)) return sendJson(response, 403, { error: REFUSED, reason: refusalReason(request) })
         let summary: UpdateSummary
         try {
           // Forced: "update all" is an explicit instruction from a human, and
@@ -308,7 +339,7 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
       path: `${prefix}/api/operations`,
       handler: (request, response) => {
         if (request.method !== 'GET') return methodNotAllowed(response, 'GET')
-        if (!sameOriginRead(request)) return sendJson(response, 403, { error: REFUSED })
+        if (!sameOriginRead(request)) return sendJson(response, 403, { error: REFUSED, reason: refusalReason(request) })
         const id = new URL(request.url ?? '/', 'http://localhost').searchParams.get('id')
           ?? new URL(request.url ?? '/', 'http://localhost').searchParams.get('operationId')
         if (id === null || id === '') {
@@ -329,7 +360,7 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
       path: `${prefix}/api/restart`,
       handler: (request, response) => {
         if (request.method !== 'POST') return methodNotAllowed(response, 'POST')
-        if (!sameOriginMutation(request)) return sendJson(response, 403, { error: REFUSED })
+        if (!sameOriginMutation(request)) return sendJson(response, 403, { error: REFUSED, reason: refusalReason(request) })
         const capability = restartCapability({ desktopService: deps.desktopService })
         if (!capability.supported) {
           sendJson(response, 409, { error: capability.reason, reason: capability.managedBy })

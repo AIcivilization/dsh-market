@@ -454,12 +454,14 @@ export async function requestRestart(options: RequestOptions = {}): Promise<Rest
   } catch (error) {
     if (!(error instanceof ApiError)) throw error
     if (error.code === 'unreachable') return { accepted: true }
-    if (error.code === 'http' && error.status === 409) {
-      // `hostError` (the wire's `error` field) is the USER-FACING sentence and
-      // is what belongs in a tooltip. The wire's `reason` field is a machine
-      // token — for the desktop refusal it is literally "desktop-host" — so it
-      // must NOT be used as the user-visible text. `hostReason` is carried on
-      // the error for callers that want to branch on the slug.
+    // `hostError` (the wire's `error` field) is the USER-FACING sentence and is
+    // what belongs in a tooltip; the wire's `reason` field is a machine token,
+    // so it must NOT be used as the user-visible text. Both 409 (the host
+    // declining: a supervisor owns it, or an update is running) and 403 (the
+    // same-origin fence refusing) carry that sentence, and both are decisions
+    // rather than failures. The 403 branch was missing, which turned a legible
+    // refusal into a raw thrown error.
+    if (error.code === 'http' && (error.status === 409 || error.status === 403)) {
       return { accepted: false, reason: error.hostError ?? '' }
     }
     throw error
