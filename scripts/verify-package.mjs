@@ -121,6 +121,18 @@ if (typeof patchRel === 'string') {
       'bundle patch names this package',
       `expected to find "${manifest.name}" in ${patchRel}`,
     )
+    // The layer id must be unique across every layer in a profile. A collision
+    // is silent: the Loader keeps one row and the other plugin disappears with
+    // no error — unmounted routes, unserved client bundle. `dshmarket` ships
+    // `id: dsh-market`, so the bare package name is NOT safe here.
+    const layerId = /^\s*-\s*insert:\s*\n\s*-\s*id:\s*(\S+)/m.exec(body)?.[1]
+    check(
+      layerId !== undefined && layerId !== manifest.name,
+      'bundle patch layer id is namespaced, not the bare package name',
+      layerId === manifest.name
+        ? `id "${layerId}" collides with the third-party dshmarket plugin, which hardcodes this id`
+        : `id is ${layerId ?? 'missing'}`,
+    )
   }
 }
 

@@ -7,8 +7,15 @@
 #
 # `name` must be the package name so Node resolution finds this package from the
 # profile directory. `id` is the layer row's stable identity in the composed
-# profile; it must be unique within the profile and must match the store id the
-# plugin's own effects key on.
+# profile, and it MUST be unique across every layer in that profile — two bundle
+# patches claiming the same id means the Loader keeps only one of them, and the
+# loser vanishes silently (no error, no log line): its host routes are never
+# mounted and its client half is never served.
+#
+# This is not hypothetical. The third-party `dshmarket` plugin hardcodes
+# `id: dsh-market` in its own patch, so reusing that obvious id here collides
+# with it on any machine that has dshmarket installed. The id is namespaced to
+# our own package name instead.
 - insert:
-    - id: dsh-market
+    - id: dsh-market-toolbar
       name: 'dsh-market'
