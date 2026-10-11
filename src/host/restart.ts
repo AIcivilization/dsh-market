@@ -177,6 +177,7 @@ export function restartHelperSource(
   launch: { cwd: string },
   logs: { out: string; err: string },
   port: number | null,
+  dying: number | null = null,
 ): string {
   return [
     "const { spawn } = require('node:child_process')",
@@ -190,6 +191,7 @@ export function restartHelperSource(
     `const logOut = ${JSON.stringify(logs.out)}`,
     `const logErr = ${JSON.stringify(logs.err)}`,
     `const port = ${JSON.stringify(port)}`,
+    `const dying = ${JSON.stringify(dying)}`,
     'const sleep = (ms) => new Promise(r => setTimeout(r, ms))',
     'const note = (line) => { try { fs.appendFileSync(logErr, "[dsh-market] " + line + "\\n") } catch {} }',
     'process.on("exit", (code) => note("helper exiting (code " + code + ")"))',
@@ -205,8 +207,24 @@ export function restartHelperSource(
     '  probe.on("error", () => done(false))',
     '  setTimeout(() => done(false), 500)',
     '})',
+    // `process.kill(pid, 0)` asks the OS whether the process still exists
+    // without delivering a signal. EPERM means it exists but is not ours.
+    'const alive = (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e && e.code === "EPERM" } }',
     'const main = async () => {',
-    '  note("helper up (pid " + process.pid + ") for port " + port)',
+    '  note("helper up (pid " + process.pid + ") for port " + port + ", waiting on " + dying)',
+    // THE ORDER THAT MATTERS. On macOS the replacement is an Electron app
+    // guarded by requestSingleInstanceLock(), and the old app holds that lock
+    // until its process is GONE — it is never released explicitly. Launching
+    // while the old app is still dying lets the new instance start, fail the
+    // lock, and call application.quit() on itself: `open -n` exits 0 and
+    // nothing appears. The port goes quiet well before the lock frees, so
+    // waiting on the port is not enough — we wait for the process itself.
+    '  if (dying) {',
+    '    const deadline = Date.now() + 30000',
+    '    while (Date.now() < deadline && alive(dying)) await sleep(200)',
+    '    note(alive(dying) ? "old process " + dying + " still alive after 30s; launching anyway" : "old process " + dying + " is gone; the single-instance lock is free")',
+    '    await sleep(400)',
+    '  }',
     '  if (port) {',
     '    const until = Date.now() + 30000',
     '    while (Date.now() < until && await listening()) await sleep(250)',
@@ -280,7 +298,7 @@ export function scheduleRestart(
   const helperSpawn = deps.spawnHelper ?? spawn
   const helper = helperSpawn(
     nodeExecutable(),
-    ['-e', restartHelperSource(spawned, launch, { out: logOut, err: logErr }, port)],
+    ['-e', restartHelperSource(spawned, launch, { out: logOut, err: logErr }, port, plan.dying)],
     { detached: true, stdio: 'ignore', env: process.env },
   )
   helper.unref()
@@ -305,6 +323,15 @@ export interface RestartPlan {
   readonly stop: () => void
   /** Whether this plan relaunches the Electron bundle rather than the host. */
   readonly desktop: boolean
+  /**
+   * The process that must EXIT before the launch is attempted, or null.
+   *
+   * On the desktop this is the whole Electron application: it owns the
+   * single-instance lock, and the lock only frees when the process is gone.
+   * Launching earlier makes the replacement quit itself on the failed lock —
+   * a silent no-op whose only symptom is "I quit and nothing came back".
+   */
+  readonly dying: number | null
 }
 
 /**
@@ -319,6 +346,7 @@ export function restartPlan(desktop: boolean): RestartPlan {
       launch: restartLaunch(),
       stop: () => { process.kill(process.pid, 'SIGTERM') },
       desktop: false,
+      dying: null,
     }
   }
   // Electron spawns the desktop host, which is this process, so the shell is
@@ -337,6 +365,7 @@ export function restartPlan(desktop: boolean): RestartPlan {
       }
     },
     desktop: true,
+    dying: shellPid,
   }
 }
 

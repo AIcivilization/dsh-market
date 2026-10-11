@@ -31,7 +31,9 @@ import {
   desktopPlanForTest,
   desktopRelaunch,
   electronBundlePath,
+  restartHelperSource,
   restartPlan,
+  scheduleRestart,
 } from '../../src/host/restart.js'
 
 /**
@@ -404,5 +406,66 @@ describe('hasActiveTasks', () => {
       .toEqual({ activeTasks: true, scheduledTasks: false })
     expect(inspectTasks([], noJobs, true))
       .toEqual({ activeTasks: false, scheduledTasks: true })
+  })
+})
+
+describe('the restart helper waits for the right thing', () => {
+  const spawned = { file: 'open', args: ['-n', '/Applications/DSH.app'], viaShell: false, detached: true }
+
+  it('waits for the dying process, not just the port', () => {
+    // The regression this pins: the app was quitting and never coming back.
+    // macOS holds the single-instance lock until the old app's process is
+    // GONE, and the port goes quiet well before that. Launching on "port free"
+    // let the replacement start, fail requestSingleInstanceLock(), and call
+    // application.quit() on itself — `open -n` exits 0 and nothing appears.
+    const source = restartHelperSource(spawned, { cwd: '/' }, { out: 'o', err: 'e' }, 19387, 4242)
+    expect(source).toContain('const dying = 4242')
+    expect(source).toContain('process.kill(pid, 0)')
+  })
+
+  it('checks the dying process BEFORE it starts the replacement', () => {
+    const source = restartHelperSource(spawned, { cwd: '/' }, { out: 'o', err: 'e' }, 19387, 4242)
+    const waitAt = source.indexOf('while (Date.now() < deadline && alive(dying))')
+    const spawnAt = source.indexOf('spawn(file, args,')
+    expect(waitAt).toBeGreaterThan(-1)
+    expect(spawnAt).toBeGreaterThan(-1)
+    // Order is the whole fix; both present but reversed is still broken.
+    expect(waitAt).toBeLessThan(spawnAt)
+  })
+
+  it('has nothing to wait for on a web host', () => {
+    // A web host replays its own invocation and has no instance lock, so the
+    // guard must not stall it.
+    expect(restartHelperSource(spawned, { cwd: '/' }, { out: 'o', err: 'e' }, 19999, null))
+      .toContain('const dying = null')
+  })
+
+  it('gives the desktop plan a dying pid and the web plan none', () => {
+    expect(restartPlan(true).dying).toBe(process.ppid)
+    expect(desktopPlanForTest().dying).toBe(process.ppid)
+  })
+
+  it('actually runs the wait: the spawned helper is told a real pid', () => {
+    // A source-shape assertion alone would pass while the call site drops the
+    // argument. This drives scheduleRestart and reads what the helper receives
+    // — pid, ordering, and gate in one observable.
+    const calls: { args: readonly string[] }[] = []
+    scheduleRestart(
+      19387,
+      () => {},                       // never ask anything to stop
+      () => {},                       // and never signal
+      {
+        plan: desktopPlanForTest(),
+        spawnHelper: ((_file: string, args: readonly string[]) => {
+          calls.push({ args })
+          return { pid: 12345, unref: () => {} }
+        }) as never,
+      },
+    )
+    expect(calls).toHaveLength(1)
+    const program = calls[0]!.args[1]!
+    expect(program).toContain(`const dying = ${process.ppid}`)
+    expect(program.indexOf('while (Date.now() < deadline && alive(dying))'))
+      .toBeLessThan(program.indexOf('spawn(file, args,'))
   })
 })
