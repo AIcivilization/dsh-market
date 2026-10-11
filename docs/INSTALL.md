@@ -198,17 +198,24 @@ Restart the **application** to activate (see below).
 ### Restarting DSH Desktop
 
 Bundle layers are composed at boot, so the plugin is inert in the running
-process. Under DSH Desktop you cannot do this from a terminal:
+process. The plugin's **重启 DSH / Restart DSH** button handles this: on DSH
+Desktop it relaunches the app bundle with `open -n` and stops the shell, which
+is the external equivalent of the shell's own `app.relaunch()`.
 
-- The `desktop` profile is locked to the app (above).
-- Killing the host child process does **not** work — the Electron parent owns and
-  supervises it, and the browser session is bound to a secret minted per
-  activation and held in memory, so a session does not survive a bare host
-  restart either.
+Doing it by hand is a plain quit and reopen:
 
-Use **重启应用与 Host / Restart App and Host** from the app's menu. This is also
-exactly what the plugin's own restart button tells you to do in this
-environment, which is why that button is disabled rather than failing.
+- **⌘Q** (or the **DeepSeek Harness → 退出 DeepSeek Harness** menu item), then
+  reopen the app.
+
+There is no restart menu item in the packaged app. `restartAppHostMenu`
+("重启应用与 Host / Restart App and Host") is real but is built inside
+`...development ? [...] : []`, and `development` is `!app.isPackaged` — so it
+appears only in development builds, not in `/Applications/DeepSeek Harness.app`.
+On macOS there is also no tray menu (the tray is constructed only for Windows).
+
+You cannot restart the host from a terminal instead: the `desktop` profile is
+locked to the app, and killing the host child does **not** work, because the
+Electron shell owns and supervises it.
 
 ## Uninstall
 

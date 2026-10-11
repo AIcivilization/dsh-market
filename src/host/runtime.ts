@@ -12,23 +12,29 @@
  *    to bring the replacement up — so "restart" kills a service and nothing
  *    comes back.
  *
- *  - The **Electron desktop host** owns the process. It spawns a
- *    `dsh-desktop-host` child that owns the profile; killing that child from
- *    inside leaves the app with a dead profile and no way to bring it back,
- *    because the relaunch belongs to the shell.
+ *  - The **Electron desktop host** is a `spawn`ed child of the Electron shell,
+ *    which owns the app's lifecycle. Verified against the shipped shell rather
+ *    than assumed:
  *
- *    This was verified against the shipped shell rather than assumed. The
- *    shell's own restart is `restart: () => { app.relaunch();
- *    quitWithoutConfirmation() }`, and it lives in the Electron MAIN process.
- *    The host runs as a `spawn`ed child over a Node IPC channel
- *    (`stdio: [..., "ipc"]`), but the shell validates every inbound message
- *    with `isDesktopHostEvent` and accepts only `shutdown-complete`, `ready`,
- *    `platform-session`, `fatal`, `update-tasks` and `quit-inspection` —
- *    anything else is treated as a protocol violation and the host is killed
- *    with SIGTERM. There is no message that asks the shell to relaunch, so a
- *    plugin literally cannot trigger it. The user-facing answer is the app's
- *    own menu item, `restartAppHostMenu`: 重启应用与 Host / Restart App and
- *    Host, which is one click and already exists.
+ *      - The shell's own restart is `app.relaunch();
+ *        quitWithoutConfirmation()`, defined in the Electron MAIN process.
+ *      - The host talks to it over a Node IPC channel
+ *        (`stdio: [..., "ipc"]`), but `isDesktopHostEvent` accepts only
+ *        `shutdown-complete`, `ready`, `platform-session`, `fatal`,
+ *        `update-tasks` and `quit-inspection`; anything else is a protocol
+ *        violation and the host is SIGTERM'd. There is no relaunch message.
+ *      - The menu item `restartAppHostMenu` (重启应用与 Host / Restart App and
+ *        Host) is NOT a fallback: it is built only inside a
+ *        `...development ? [...] : []` spread, and `development =
+ *        !app.isPackaged`. A packaged app therefore has no restart menu item
+ *        at all, so pointing users at it would send them somewhere empty.
+ *
+ *    So the plugin cannot ask the shell to restart, and killing the host alone
+ *    would strand the app with a dead profile. What it CAN do is reproduce
+ *    `app.relaunch()` from outside the process: relaunch the app bundle with
+ *    `open -n` and stop the shell. See `restartPlan` in restart.ts. That is
+ *    why desktop restart is supported but reported under a different manager —
+ *    the mechanism, and the blast radius, are not the same as a web host's.
  *
  *  - A plain **web** host (`dsh web` from a terminal) owns nothing but
  *    itself, so re-executing the exact invocation that booted it is safe.
@@ -393,15 +399,20 @@ export function restartCapability(options: {
   const parent = readParent(ppid)
 
   if (detection.desktop) {
+    // Supported, but by a different mechanism than a web host: we relaunch the
+    // Electron application bundle and stop the shell, reproducing what the
+    // shell's own `restartAppHostMenu` handler does. It is reported as a
+    // distinct manager because the client's messaging differs — the app really
+    // does go away and come back, taking every window with it.
     return {
-      supported: false,
+      supported: true,
       managedBy: 'desktop-host',
       runtimeReason: detection.reason,
       supervisor,
       parentComm: parent,
       desktopSignals: detection.signals,
       debuggerAttached,
-      reason: 'DSH Desktop 拥有这个进程的生命周期，插件无法重启它。请退出并重新打开 DSH Desktop 应用来完成重启。 / DSH Desktop owns this process, so the plugin cannot restart it. Quit and reopen the DSH Desktop app to restart.',
+      reason: null,
     }
   }
   if (supervisor !== null) {

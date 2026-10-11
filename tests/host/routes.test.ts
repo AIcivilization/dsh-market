@@ -191,7 +191,7 @@ describe('the guard', () => {
   })
 
   it('allows a same-origin mutation past the guard', async () => {
-    const routes = mount({ restart: () => ({ pid: 1, helperPid: 2, logOut: '', logErr: '' }) })
+    const routes = mount({ restart: () => ({ pid: 1, helperPid: 2, logOut: '', logErr: '', desktop: false }) })
     const response = await call(
       find(routes, `${ROUTE_PREFIX}/api/restart`),
       request({ method: 'POST', origin: 'http://127.0.0.1:19387' }),
@@ -287,14 +287,18 @@ describe('ping and capabilities', () => {
     expect(body.restart.managedBy).toBe('market')
   })
 
-  it('publishes the desktop verdict with an actionable reason', async () => {
+  it('publishes the desktop verdict as restartable via the app bundle', async () => {
+    // Desktop restart is supported, but by relaunching the Electron bundle
+    // rather than re-executing the host, so the manager is still named.
     const routes = mount({ desktopService: true })
     const response = await call(find(routes, `${ROUTE_PREFIX}/api/capabilities`), request({ url: '/api/capabilities' }))
     const body = response.body as { runtime: string; features: Record<string, boolean>; restart: { supported: boolean; managedBy: string; reason?: string } }
     expect(body.runtime).toBe('desktop')
-    expect(body.features['restart']).toBe(false)
+    expect(body.features['restart']).toBe(true)
+    expect(body.restart.supported).toBe(true)
     expect(body.restart.managedBy).toBe('desktop-host')
-    expect(body.restart.reason).toBeTruthy()
+    // No refusal means no refusal copy.
+    expect(body.restart.reason).toBeUndefined()
   })
 })
 
@@ -499,20 +503,21 @@ describe('starting an update', () => {
 })
 
 describe('restart', () => {
-  it('refuses on the desktop host with a reason, without spawning anything', async () => {
-    const restart = vi.fn(() => ({ pid: 1, helperPid: 2, logOut: '', logErr: '' }))
+  it('restarts on the desktop host by relaunching the app bundle', async () => {
+    // Previously refused. It is now allowed, but through the desktop plan, so
+    // the assertion is on the resolution rather than the refusal.
+    const restart = vi.fn(() => ({ pid: 1, helperPid: 2, logOut: '', logErr: '', desktop: true }))
     const routes = mount({ desktopService: true, restart: restart as never })
     const response = await call(
       find(routes, `${ROUTE_PREFIX}/api/restart`),
       request({ method: 'POST', url: '/api/restart', origin: 'http://127.0.0.1:19387' }),
     )
-    expect(response.status).toBe(409)
-    expect((response.body as { reason: string }).reason).toBe('desktop-host')
-    expect(restart).not.toHaveBeenCalled()
+    expect(response.status).toBe(202)
+    expect(restart).toHaveBeenCalledTimes(1)
   })
 
   it('accepts and schedules on a plain web host, passing the serving port', async () => {
-    const restart = vi.fn(() => ({ pid: 1, helperPid: 2, logOut: '', logErr: '' }))
+    const restart = vi.fn(() => ({ pid: 1, helperPid: 2, logOut: '', logErr: '', desktop: false }))
     const routes = mount({ restart: restart as never })
     const response = await call(
       find(routes, `${ROUTE_PREFIX}/api/restart`),

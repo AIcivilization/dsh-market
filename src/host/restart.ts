@@ -38,6 +38,54 @@ export function nodeExecutable(argv0: string | undefined = process.argv0, execPa
 }
 
 /**
+ * The boot invocation to replay for a DESKTOP host.
+ *
+ * On a desktop host there is nothing inside this process worth replaying: we
+ * are a `spawn`ed child of the Electron shell, and the thing that must come
+ * back is the whole application. The shell does this itself with
+ *
+ *   app.relaunch(); quitWithoutConfirmation()
+ *
+ * which is exactly `open -n -a <bundle>` followed by a non-interactive quit.
+ * We cannot call `app.relaunch()` — it lives in the Electron main process, and
+ * the shell rejects every IPC message outside its own six-type whitelist — so
+ * we reproduce its effect from outside the process instead.
+ *
+ * `-n` is load-bearing, not cosmetic. The app takes a single-instance lock and
+ * routes a second launch to `focusPrimaryWindow()`; a plain `open` while the
+ * old app is still alive would therefore just focus the existing window and
+ * change nothing. `-n` asks for a genuinely new instance, which only succeeds
+ * once the old one has released the lock — and the helper already waits for the
+ * port to go quiet before spawning, so the ordering is correct by construction.
+ *
+ * `open` is addressed by bundle identifier rather than name: a display name can
+ * be renamed or localized, while `com.deepseek.dsh` is stable. The bundle path
+ * is recovered from the Electron shell's argv when it can be, so an app that
+ * lives somewhere unusual is relaunched from where it actually is.
+ */
+export function desktopRelaunch(bundleId: string, bundlePath?: string): { file: string; args: string[]; cwd: string; viaShell: boolean } {
+  const args = bundlePath !== undefined && bundlePath !== ''
+    ? ['-n', bundlePath]
+    : ['-n', '-b', bundleId]
+  return { file: 'open', args, cwd: process.cwd(), viaShell: false }
+}
+
+/**
+ * The Electron application bundle that owns this process, if it can be found.
+ *
+ * The desktop host is launched as
+ * `<bundle>/Contents/MacOS/<exe> --expose-internals <host entry> …`, so argv[0]
+ * is the shell's own executable and the bundle is the third ancestor from it.
+ * Falls back to undefined, which makes the relaunch address the bundle by
+ * identifier instead.
+ */
+export function electronBundlePath(argv0: string | undefined = process.argv0): string | undefined {
+  if (argv0 === undefined || argv0 === '') return undefined
+  const match = /^(.*\.app)\/Contents\/MacOS\//.exec(argv0)
+  return match?.[1]
+}
+
+/**
  * The exact boot invocation to replay.
  *
  * When argv[1] looks like a DSH entry (`bin.js`, `bin.ts`, `dsh`) the child is
@@ -110,6 +158,8 @@ export interface RestartResult {
   readonly helperPid: number | undefined
   readonly logOut: string
   readonly logErr: string
+  /** Whether this restarted the whole Electron app rather than the host. */
+  readonly desktop: boolean
 }
 
 /**
@@ -212,14 +262,17 @@ export function restartHelperSource(
  * @param port - the port the replacement must bind, when it is known.
  * @param schedule - how the current process is asked to stop; injectable so
  *   tests never kill their own runner.
+ * @param plan - the launch to replay and how to stop; defaults to the plan for
+ *   the detected runtime.
  */
 export function scheduleRestart(
   port: number | null,
   schedule: (fn: () => void) => void = fn => { setTimeout(fn, 500) },
-  stop: () => void = () => { process.kill(process.pid, 'SIGTERM') },
-  deps: { readonly spawnHelper?: typeof spawn } = {},
+  stop?: () => void,
+  deps: { readonly spawnHelper?: typeof spawn; readonly plan?: RestartPlan } = {},
 ): RestartResult {
-  const launch = restartLaunch()
+  const plan = deps.plan ?? restartPlan(detectRuntime(process.argv, process.env) === 'desktop')
+  const launch = plan.launch
   const spawned = respawnInvocation(launch)
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   const logOut = join(tmpdir(), `dsh-market-restart-${stamp}.out.log`)
@@ -234,9 +287,77 @@ export function scheduleRestart(
   // The delay lets the 202 response flush before the process goes away; a
   // response cut off mid-write reads to the client as a failed request, which
   // is indistinguishable from "the button did nothing".
-  schedule(() => { stop() })
-  return { pid: process.pid, helperPid: helper.pid, logOut, logErr }
+  const stopper = stop ?? plan.stop
+  schedule(() => { stopper() })
+  return { pid: process.pid, helperPid: helper.pid, logOut, logErr, desktop: plan.desktop }
 }
+
+/**
+ * Which launch to replay, and which process to stop afterwards.
+ *
+ * A web host replays its own invocation and stops itself. A desktop host
+ * relaunches the application bundle and stops the whole app, because the host
+ * it is running in is a child that the shell would otherwise keep alive.
+ */
+export interface RestartPlan {
+  readonly launch: { file: string; args: string[]; cwd: string; viaShell: boolean }
+  /** How the process that owns the port is asked to stop. */
+  readonly stop: () => void
+  /** Whether this plan relaunches the Electron bundle rather than the host. */
+  readonly desktop: boolean
+}
+
+/**
+ * Build the restart plan for the detected runtime.
+ *
+ * @param desktop - whether the Electron shell owns this process.
+ * @returns the launch to replay and how to stop the current process.
+ */
+export function restartPlan(desktop: boolean): RestartPlan {
+  if (!desktop) {
+    return {
+      launch: restartLaunch(),
+      stop: () => { process.kill(process.pid, 'SIGTERM') },
+      desktop: false,
+    }
+  }
+  // Electron spawns the desktop host, which is this process, so the shell is
+  // our PARENT — not, as it is tempting to write, the parent's parent.
+  // Signalling it is what `quitWithoutConfirmation()` amounts to from outside;
+  // the app's single-instance lock is then free for the relaunched bundle to
+  // take.
+  const shellPid = process.ppid
+  return {
+    launch: desktopRelaunch(DESKTOP_BUNDLE_ID, electronBundlePath()),
+    stop: () => {
+      try {
+        process.kill(shellPid, 'SIGTERM')
+      } catch {
+        // The shell may already be gone; the relaunch is still correct.
+      }
+    },
+    desktop: true,
+  }
+}
+
+/**
+ * The desktop plan for tests and probes, with real signalling neutralised.
+ *
+ * `restartPlan(true).stop()` sends SIGTERM to the parent process, which is
+ * exactly right in production and exactly wrong under a test runner — the
+ * runner is the parent, so invoking it kills the suite mid-file. Callers that
+ * want to exercise the launch command without arming a signal use this.
+ *
+ * @param signal - what to do instead of signalling; records or ignores.
+ * @returns the desktop plan with a recording stop.
+ */
+export function desktopPlanForTest(signal: (pid: number) => void = () => {}): RestartPlan {
+  const plan = restartPlan(true)
+  return { ...plan, stop: () => { signal(process.ppid) } }
+}
+
+/** The Electron application's stable bundle identifier. */
+const DESKTOP_BUNDLE_ID = 'com.deepseek.dsh'
 
 /** Whether this host may restart at all — the runtime's own answer. */
 export function restartSupported(desktopService = false): boolean {

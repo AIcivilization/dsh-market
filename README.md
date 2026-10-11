@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 **Update and restart controls for DeepSeek Harness, in the row you already look at.**
 
-Two buttons in the plugins page header — one checks every installed plugin for updates and installs them all in a click, one restarts DSH.
+Two buttons in the plugins page header — one checks every installed plugin for updates and installs them all in a click, one restarts DSH (including restarting the Electron app on desktop).
 
 ## What you get
 
@@ -12,7 +12,7 @@ Two buttons in the plugins page header — one checks every installed plugin for
 - **Update all, with live progress** — one click installs every updatable plugin. Each package reports its own state (pending / running / done / failed), and one failing package does not abort the rest: you get a per-package report rather than a single opaque error.
 - **Honest about what it checked** — the button distinguishes "nothing to update" from "nothing was examined". A scan that could not run says so instead of quietly reporting you are up to date.
 - **Restart DSH in place** — for terminal-launched `dsh web`, one click re-executes the exact invocation that booted your host and brings it back, reloading the page when the new process answers.
-- **Knows when it must not restart itself** — under a process supervisor or the Electron desktop shell, restart is owned by something else. The button disables itself and says who owns it, rather than killing a process it cannot bring back.
+- **Knows how to restart itself in each environment** — a plain `dsh web` host replays its own invocation; under DSH Desktop, where the host is a child of the Electron shell, the button relaunches the app bundle (`open -n`) and stops the shell instead. Neither path kills a process it cannot bring back. Under a process supervisor restart is refused outright, and the button disables itself and says who owns it.
 - **No dependencies on other plugins.** The whole thing is self-contained: it reads your profile and drives your package manager itself.
 
 ## Install
@@ -64,7 +64,7 @@ The browser half talks to the host half over a small same-origin JSON API under 
 | `POST` | `/api/updates` | Update one package |
 | `POST` | `/api/updates/all` | Update every updatable package |
 | `GET` | `/api/operations?id=` | Per-package progress for one operation |
-| `POST` | `/api/restart` | Restart the host process, when it owns its own lifecycle |
+| `POST` | `/api/restart` | Restart: replays the host invocation on `dsh web`, relaunches the app bundle on DSH Desktop |
 
 Reads are loopback-only and same-origin; mutations additionally require a matching `Origin`. `checked` in the summary is the denominator and is the real number of plugins examined — a failed scan is an error, never `checked: 0`.
 

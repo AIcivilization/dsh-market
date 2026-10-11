@@ -25,6 +25,12 @@ import {
   isElectronParent,
   restartCapability,
 } from '../../src/host/runtime.js'
+import {
+  desktopPlanForTest,
+  desktopRelaunch,
+  electronBundlePath,
+  restartPlan,
+} from '../../src/host/restart.js'
 
 /**
  * The real argv of the `dsh-desktop-host` child of the Electron app
@@ -237,13 +243,14 @@ describe('detectDebugger', () => {
 })
 
 describe('restartCapability', () => {
-  it('refuses on the desktop host and names the actionable step', () => {
+  it('supports restart on the desktop host through the app bundle', () => {
+    // The desktop host is a child of the Electron shell and cannot call
+    // app.relaunch(), so restart works by relaunching the bundle and stopping
+    // the shell — a different mechanism, reported as a different manager.
     const capability = restartCapability(onDesktopMachine)
-    expect(capability.supported).toBe(false)
+    expect(capability.supported).toBe(true)
     expect(capability.managedBy).toBe('desktop-host')
-    expect(capability.reason).toContain('DSH Desktop')
-    // Actionable copy, not a bare error code.
-    expect(capability.reason).toMatch(/Quit and reopen|退出并重新打开/)
+    expect(capability.reason).toBeNull()
   })
 
   it('allows a plain web host', () => {
@@ -285,5 +292,66 @@ describe('restartCapability', () => {
     const capability = restartCapability(onDesktopMachine)
     expect(capability.desktopSignals.filter(signal => signal.fired).length).toBeGreaterThanOrEqual(DESKTOP_SIGNAL_THRESHOLD)
     expect(capability.runtimeReason).toContain('signals indicate the desktop shell')
+  })
+})
+
+/**
+ * The desktop relaunch command.
+ *
+ * A desktop host cannot call `app.relaunch()` — it lives in the Electron main
+ * process, and the shell rejects every IPC message outside its own whitelist.
+ * The equivalent command is therefore issued from outside the process, and
+ * these tests pin the two details that make it work at all.
+ */
+describe('desktop relaunch', () => {
+  it('addresses the bundle by identifier when the path is unknown', () => {
+    const launch = desktopRelaunch('com.deepseek.dsh')
+    expect(launch.file).toBe('open')
+    // -n is load-bearing: without it macOS routes the launch to the existing
+    // instance's single-instance-lock handler, which only focuses the window.
+    expect(launch.args).toContain('-n')
+    expect(launch.args).toEqual(['-n', '-b', 'com.deepseek.dsh'])
+  })
+
+  it('prefers the real bundle path when it can be recovered', () => {
+    const launch = desktopRelaunch('com.deepseek.dsh', '/Applications/DeepSeek Harness.app')
+    expect(launch.args).toEqual(['-n', '/Applications/DeepSeek Harness.app'])
+  })
+
+  it('recovers the bundle from a real Electron argv0', () => {
+    expect(electronBundlePath('/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness'))
+      .toBe('/Applications/DeepSeek Harness.app')
+    // A nested app must resolve to the OUTERMOST bundle, or the relaunch would
+    // start a helper process instead of the application.
+    expect(electronBundlePath('/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness'))
+      .not.toContain('/Contents/MacOS')
+  })
+
+  it('returns undefined for a non-Electron argv0', () => {
+    expect(electronBundlePath('/usr/local/bin/node')).toBeUndefined()
+    expect(electronBundlePath(undefined)).toBeUndefined()
+    expect(electronBundlePath('')).toBeUndefined()
+  })
+
+  it('relaunches the bundle and stops the shell on a desktop host', () => {
+    // The real stop() signals process.ppid, which under vitest is the test
+    // runner itself — calling it would kill this suite mid-file. The recorder
+    // captures the intended target instead.
+    let signalled: number | undefined
+    const plan = desktopPlanForTest(pid => { signalled = pid })
+    expect(plan.desktop).toBe(true)
+    expect(plan.launch.file).toBe('open')
+    expect(plan.launch.args).toContain('-n')
+    plan.stop()
+    // The Electron shell is this process's PARENT, not its parent's parent:
+    // Electron spawns the desktop host directly.
+    expect(signalled).toBe(process.ppid)
+    expect(signalled).not.toBe(process.pid)
+  })
+
+  it('still replays its own invocation on a web host', () => {
+    const plan = restartPlan(false)
+    expect(plan.desktop).toBe(false)
+    expect(plan.launch.file).not.toBe('open')
   })
 })
