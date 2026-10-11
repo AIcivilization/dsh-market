@@ -21,6 +21,12 @@ export const zh = {
   updateIdle: '更新',
   updateChecking: '正在检查更新…',
   updateUpToDate: '已是最新版本',
+  /* A finished check that could not examine everything. Kept distinct from
+     `updateUpToDate` (which must only ever mean "examined, nothing to install")
+     and from `updateChecking` (which must only ever mean "still running"). */
+  updatePartialCheck: '已检查 {checked}/{total} 个，{failed} 个查询失败',
+  updateCheckFailed: '检查失败，点击重试',
+  updateNeverChecked: '尚未检查更新',
   updateAvailable: '发现 {count} 个插件可更新',
   updateRunning: '正在更新 {done}/{total}…',
   updateStarting: '正在开始更新…',
@@ -88,6 +94,9 @@ export const en = {
   updateIdle: 'Update',
   updateChecking: 'Checking for updates…',
   updateUpToDate: 'Everything is up to date',
+  updatePartialCheck: 'Checked {checked}/{total}: {failed} could not be queried',
+  updateCheckFailed: 'Check failed — click to retry',
+  updateNeverChecked: 'Not checked for updates yet',
   updateAvailable: '{count} plugin(s) can be updated',
   updateRunning: 'Updating {done}/{total}…',
   updateStarting: 'Starting update…',

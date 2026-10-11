@@ -82,6 +82,7 @@ an actionable bilingual `reason` and `managedBy` names who owns it
 {
   "checked": 5,
   "updatable": 1,
+  "checkFailed": 0,
   "packages": [
     { "name": "dsh-vpn", "source": "npm", "installedVersion": "0.1.6", "latestVersion": "0.1.7" }
   ],
@@ -94,6 +95,11 @@ an actionable bilingual `reason` and `managedBy` names who owns it
 - `checked` is the real number of installed plugins examined, **including ones
   already current**. It is the denominator: a client can distinguish "nothing to
   update" from "nothing was looked at".
+- `checkFailed` is how many of those rows could not be queried at all — an
+  unreachable registry, or a spec that cannot be resolved. **`checked` counts
+  attempts, not successes**, so this field is the only way a client can tell
+  "examined everything, nothing to install" from "the check could not run".
+  Without it a network failure is indistinguishable from being up to date.
 - `packages` lists only what can actually be updated.
 - `skipped` is an extension listing everything else with a machine-readable
   `reason`: `up-to-date`, `check-failed`, `not-installed`, `local-source`,

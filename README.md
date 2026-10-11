@@ -60,7 +60,7 @@ The browser half talks to the host half over a small same-origin JSON API under 
 | --- | --- | --- |
 | `GET` | `/api/ping` | Liveness plus a `bootId` that changes every process start |
 | `GET` | `/api/capabilities` | Which features work here, and who owns restart |
-| `GET` | `/api/updates/summary` | Which installed plugins are behind (`?force=1` skips the cache) |
+| `GET` | `/api/updates/summary` | Which installed plugins are behind (`?force=1` skips the cache). Reports `checkFailed` alongside `checked`, because `checked` counts attempts — without it an unreachable registry looks like being up to date |
 | `POST` | `/api/updates` | Update one package |
 | `POST` | `/api/updates/all` | Update every updatable package |
 | `GET` | `/api/operations?id=` | Per-package progress for one operation |

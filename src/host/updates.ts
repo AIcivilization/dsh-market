@@ -90,6 +90,15 @@ export interface UpdateSummary {
   readonly checked: number
   /** How many of them can be updated. */
   readonly updatable: number
+  /**
+   * How many rows could not be queried at all (`reason === 'check-failed'`).
+   *
+   * `checked` counts attempts rather than successes, so a client that only sees
+   * `checked`/`updatable` cannot distinguish "everything examined, nothing to
+   * install" from "the registry was unreachable" and would call the second one
+   * up to date. Publishing the failure count makes that distinction available.
+   */
+  readonly checkFailed: number
   /** Every updatable row, in manifest order. */
   readonly packages: readonly UpdatablePackage[]
   /** Every row, including the ones that cannot be updated. */
@@ -270,5 +279,11 @@ export async function checkUpdates(
       installedVersion: row.installedVersion,
       latestVersion: row.latestVersion,
     }))
-  return { checked: all.length, updatable: packages.length, packages, all }
+  return {
+    checked: all.length,
+    updatable: packages.length,
+    checkFailed: all.filter(row => row.reason === 'check-failed').length,
+    packages,
+    all,
+  }
 }

@@ -153,6 +153,31 @@ export function checkedCount(state: UpdateState): number {
 }
 
 /**
+ * How many rows the last check could not query at all.
+ * @param state - current update state.
+ * @returns the count of failed rows, or 0 before the first check settles.
+ */
+export function checkFailedCount(state: UpdateState): number {
+  return state.summary?.checkFailed ?? 0
+}
+
+/**
+ * Whether the last check examined every row successfully.
+ *
+ * This is the gate for "up to date": a check that could not reach the registry
+ * for some rows has not established that those rows are current, so claiming
+ * they are is a lie. A state that has never been checked is not clean either.
+ * @param state - current update state.
+ * @returns true only when a check completed and every row was queried.
+ */
+export function checkIsComplete(state: UpdateState): boolean {
+  const summary = state.summary
+  if (summary === undefined) return false
+  if (summary.checked === 0) return false
+  return (summary.checkFailed ?? 0) === 0
+}
+
+/**
  * The rows the popover renders, preferring live operation data.
  *
  * Before an operation starts the rows come from the summary (each pinned at

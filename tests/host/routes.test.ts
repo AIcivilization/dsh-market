@@ -309,6 +309,17 @@ describe('updates/summary', () => {
     expect(body.packages).toEqual([])
   })
 
+  it('publishes the count of rows it could not query', async () => {
+    // The client uses this to avoid reporting an unreachable registry as
+    // "everything is up to date". If the route drops the field that
+    // distinction is lost, and `checked` alone cannot recover it.
+    const routes = mount()
+    const response = await call(find(routes, `${ROUTE_PREFIX}/api/updates/summary`), request({ url: '/api/updates/summary' }))
+    const body = response.body as { checkFailed?: number }
+    expect(typeof body.checkFailed).toBe('number')
+    expect(body.checkFailed).toBe(0)
+  })
+
   it('accepts ?force=1 on the same exact route (query strings are not routed on)', async () => {
     // The host web server dispatches on pathname only, so an exact route still
     // matches when a query string is present. If that ever changed, this route

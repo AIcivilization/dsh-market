@@ -44,6 +44,16 @@ export interface UpdateSummary {
   readonly checked: number
   /** How many packages can move forward. */
   readonly updatable: number
+  /**
+   * How many packages could not be queried at all — the registry was
+   * unreachable, or the spec is not one we can resolve.
+   *
+   * The host counts `checked` as attempts, not successes, so without this the
+   * client cannot tell "examined everything, nothing to install" from "could
+   * not reach the registry" and would report the latter as up to date.
+   * Optional because an older host omits it.
+   */
+  readonly checkFailed?: number
   /** The updatable packages themselves. */
   readonly packages: readonly PluginUpdate[]
 }

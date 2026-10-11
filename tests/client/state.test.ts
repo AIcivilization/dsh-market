@@ -14,6 +14,8 @@ import {
   INITIAL_UPDATE,
   canRunRestart,
   canRunUpdate,
+  checkFailedCount,
+  checkIsComplete,
   checkedCount,
   isOperationSettled,
   pollDelayMs,
@@ -70,10 +72,11 @@ function updateState(overrides: Partial<UpdateState> = {}): UpdateState {
 }
 
 /** Build a summary with the given counts. */
-function summary(checked: number, updatable: number): UpdateSummary {
+function summary(checked: number, updatable: number, checkFailed?: number): UpdateSummary {
   return {
     checked,
     updatable,
+    ...(checkFailed === undefined ? {} : { checkFailed }),
     packages: Array.from({ length: updatable }, (_unused, index) => ({
       name: `pkg-${index}`,
       source: 'npm',
@@ -279,5 +282,39 @@ describe('poll backoff', () => {
     // Backoff must be monotonic: a later poll may never be faster than an
     // earlier one, or a long install would get hammered again at the end.
     expect(pollDelayMs(1000)).toBeGreaterThanOrEqual(pollDelayMs(0))
+  })
+})
+
+/**
+ * "Up to date" must mean "examined, nothing to install" — never "the check
+ * could not run". `checked` counts attempts rather than successes, so these
+ * guards are what stop a network failure from being reported as good news.
+ */
+describe('check completeness', () => {
+  it('counts failed rows', () => {
+    expect(checkFailedCount(updateState())).toBe(0)
+    expect(checkFailedCount(updateState({ summary: summary(6, 0, 2) }))).toBe(2)
+  })
+
+  it('is not complete before any check settles', () => {
+    expect(checkIsComplete(updateState())).toBe(false)
+  })
+
+  it('is not complete when the check examined nothing', () => {
+    expect(checkIsComplete(updateState({ summary: summary(0, 0) }))).toBe(false)
+  })
+
+  it('is not complete when some rows could not be queried', () => {
+    expect(checkIsComplete(updateState({ summary: summary(6, 0, 1) }))).toBe(false)
+  })
+
+  it('is complete only when every row was queried', () => {
+    expect(checkIsComplete(updateState({ summary: summary(6, 0, 0) }))).toBe(true)
+    // An older host omits `checkFailed`; a summary with rows still counts.
+    expect(checkIsComplete(updateState({ summary: summary(6, 0) }))).toBe(true)
+  })
+
+  it('treats a totally failed check as incomplete even with updatable rows', () => {
+    expect(checkIsComplete(updateState({ summary: summary(6, 2, 6) }))).toBe(false)
   })
 })

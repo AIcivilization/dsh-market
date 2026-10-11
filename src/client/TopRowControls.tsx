@@ -30,6 +30,7 @@ import { UpdatePanel } from './UpdatePanel.tsx'
 import { useControls } from './useControls.ts'
 import {
   RESTART_PROBE_BUDGET_MS,
+  checkFailedCount,
   checkedCount,
   updatableCount,
   updateBusy,
@@ -234,6 +235,12 @@ function UpdateGlyph({ update }: { readonly update: UpdateState }) {
   if (update.unavailable !== undefined || update.error !== undefined) {
     return <IconWarningOutlineRegular size={16} />
   }
+  // Warn on a check that could not examine anything, rather than showing the
+  // neutral refresh glyph as though nothing had gone wrong.
+  if (update.phase === 'idle' && checkFailedCount(update) > 0
+    && checkFailedCount(update) === checkedCount(update)) {
+    return <IconWarningOutlineRegular size={16} />
+  }
   return <IconRefreshOutlineRegular size={16} />
 }
 
@@ -250,6 +257,10 @@ function RestartGlyph({ restart }: { readonly restart: RestartState }) {
 function updateStateAttr(update: UpdateState): string | undefined {
   if (update.unavailable !== undefined || update.error !== undefined) return 'error'
   if (update.phase === 'done') return 'ok'
+  // A check where no row could be queried is a failure, not a quiet success:
+  // flag it so the button does not look like everything is fine.
+  if (update.phase === 'idle' && checkFailedCount(update) > 0
+    && checkFailedCount(update) === checkedCount(update)) return 'error'
   return undefined
 }
 
@@ -279,8 +290,18 @@ function updateTooltip(update: UpdateState, t: Translate): string {
     // The denominator matters: "2 of 7 checked" is not "up to date".
     return `${t('updateAvailable', { count: updatableCount(update) })} (${updatableCount(update)}/${checkedCount(update)})`
   }
-  // Zero updatable is only good news once something was actually checked.
-  return checkedCount(update) === 0 ? t('updateChecking') : t('updateUpToDate')
+  // Three genuinely different facts, and conflating any two of them misleads:
+  // a check that never ran, a check that ran but could not query every row, and
+  // a check that examined them all and found nothing. Only the last is good news.
+  if (update.summary === undefined) return t('updateNeverChecked')
+  if (checkedCount(update) === 0) return t('updateNeverChecked')
+  const failed = checkFailedCount(update)
+  if (failed > 0) {
+    return failed === checkedCount(update)
+      ? t('updateCheckFailed')
+      : t('updatePartialCheck', { checked: checkedCount(update) - failed, total: checkedCount(update), failed })
+  }
+  return t('updateUpToDate')
 }
 
 /**

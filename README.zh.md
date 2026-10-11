@@ -60,7 +60,7 @@ dsh plugin --profile web add dsh-market
 | --- | --- | --- |
 | `GET` | `/api/ping` | 存活探测，并返回每次进程启动都会变化的 `bootId` |
 | `GET` | `/api/capabilities` | 这里哪些功能可用，以及重启归谁管 |
-| `GET` | `/api/updates/summary` | 哪些已安装插件落后了（`?force=1` 跳过缓存） |
+| `GET` | `/api/updates/summary` | 哪些已安装插件落后了（`?force=1` 跳过缓存）。除 `checked` 外还报告 `checkFailed`，因为 `checked` 统计的是尝试次数 —— 没有它，连不上 registry 会看起来像「已是最新」 |
 | `POST` | `/api/updates` | 更新单个包 |
 | `POST` | `/api/updates/all` | 更新全部可更新插件 |
 | `GET` | `/api/operations?id=` | 某次操作中每个包的进度 |

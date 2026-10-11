@@ -196,6 +196,41 @@ describe('checkUpdates', () => {
     expect(summary.packages.map(row => row.name)).toEqual(['beta'])
     expect(summary.all.find(row => row.name === 'alpha')?.reason).toBe('check-failed')
   })
+
+  it('counts failed rows separately from examined rows', async () => {
+    // `checked` counts attempts, so without `checkFailed` a client cannot tell
+    // "nothing to install" from "could not reach the registry".
+    const dir = makeProfile(
+      { dependencies: { alpha: '^1.0.0', beta: '^2.0.0', gamma: '^3.0.0' }, bundles: ['alpha', 'beta', 'gamma'] },
+      { alpha: { version: '1.0.0' }, beta: { version: '2.0.0' }, gamma: { version: '3.0.0' } },
+    )
+    const summary = await checkUpdates(
+      dir,
+      deps(dir, { latest: { alpha: null, beta: null, gamma: '3.0.0' } }),
+    )
+    expect(summary.checked).toBe(3)
+    expect(summary.updatable).toBe(0)
+    expect(summary.checkFailed).toBe(2)
+  })
+
+  it('reports zero failures when every row was queried', async () => {
+    const dir = makeProfile(
+      { dependencies: { alpha: '^1.0.0' }, bundles: ['alpha'] },
+      { alpha: { version: '1.0.0' } },
+    )
+    const summary = await checkUpdates(dir, deps(dir, { latest: { alpha: '1.0.0' } }))
+    expect(summary.checked).toBe(1)
+    expect(summary.checkFailed).toBe(0)
+  })
+
+  it('reports every row failed when the registry is entirely unreachable', async () => {
+    const dir = makeProfile(
+      { dependencies: { alpha: '^1.0.0', beta: '^2.0.0' }, bundles: ['alpha', 'beta'] },
+      { alpha: { version: '1.0.0' }, beta: { version: '2.0.0' } },
+    )
+    const summary = await checkUpdates(dir, deps(dir, { latest: { alpha: null, beta: null } }))
+    expect(summary.checkFailed).toBe(summary.checked)
+  })
 })
 
 describe('isUpdatablePlugin', () => {

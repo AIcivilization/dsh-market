@@ -225,6 +225,10 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
           sendJson(response, 200, {
             checked: summary.checked,
             updatable: summary.updatable,
+            // Distinct from `checked`, which counts attempts. This is how many
+            // rows could not be queried at all, so the client can say "check
+            // failed" rather than claiming everything is up to date.
+            checkFailed: summary.checkFailed,
             packages: summary.packages.map(wireRow),
             // Rows that cannot be updated are included so a client can explain
             // a package the user expected to move, rather than leaving them to
