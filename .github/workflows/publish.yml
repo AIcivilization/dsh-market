@@ -1,0 +1,59 @@
+name: publish
+
+# Publishing is irreversible under a given version, so this workflow runs the
+# full gate and then publishes with provenance. It is triggered by a version
+# tag rather than by a push to main: a tag is a deliberate act, and it means
+# the published artifact is the one that was reviewed at that commit.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Pack and verify without publishing'
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # required for npm provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # The repo is a pnpm project (pnpm-lock.yaml is the only tracked
+      # lockfile), so `npm ci` would fail on the missing package-lock.json.
+      # The PUBLISH step still uses npm, because that is what talks to the
+      # registry and signs provenance.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The gate: typecheck, build, verify both halves, and the full test suite.
+      - name: Check
+        run: npm run check
+
+      # Proves the TARBALL (not just the source tree) is publishable.
+      - name: Prepublish check
+        run: npm run prepublish-check
+
+      - name: Publish
+        if: ${{ github.event_name == 'push' || inputs.dry-run == false }}
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Pack only (manual dry run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run != false }}
+        run: npm pack

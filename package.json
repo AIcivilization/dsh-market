@@ -64,7 +64,9 @@
     "verify": "node scripts/verify-package.mjs",
     "test": "vitest run",
     "check": "npm run typecheck && npm run build && npm run verify && npm run test",
-    "prepack": "npm run build && npm run verify"
+    "prepack": "npm run build && npm run verify",
+    "prepublish-check": "node scripts/prepublish-check.mjs",
+    "release": "npm run check && npm run prepublish-check && npm publish"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.0"

@@ -245,15 +245,51 @@ Restart the profile to unload the running plugin instance.
 
 ## Publishing a release (maintainers)
 
-The published artifacts are prebuilt. Before publishing, run the release gate —
-it inspects the real emitted bytes and refuses to pass a malformed bundle:
+The published artifacts are prebuilt, and there are **two** gates because they
+prove different things. `check` proves the source is sound; `prepublish-check`
+proves the thing npm will actually ship is the thing that passed.
 
 ```bash
 pnpm install
-pnpm run typecheck
-pnpm run build
-node scripts/verify-package.mjs
+pnpm run check        # typecheck + build + verify-package + 265 tests
+pnpm run prepublish-check
+```
+
+Or both, then publish:
+
+```bash
+npm run release       # check && prepublish-check && npm publish
 ```
 
 `lib/` and `client/` are gitignored but listed in `files`, so they are built
-during `prepack` and still included in the npm tarball.
+during `prepack` and still included in the npm tarball. The `prepack` hook runs
+`build && verify`, which means a missing build output is regenerated and
+re-verified before packing rather than shipped absent.
+
+### What the prepublish gate rejects
+
+- A required path (`lib/index.js`, `client/client.js`, `cordis.patch.yml`,
+  `package.json`) absent from the packed payload.
+- A `files` entry that is advertised but packs nothing — existence on disk is
+  not the question; what npm packs is.
+- An `exports` target that is not in the tarball.
+- **Any runtime `dependencies` entry.** This is the one worth understanding: the
+  client half `require`s `react`, `react/jsx-runtime`, `react-dom` and
+  `@deepseek-ai/dsh-client-ui-primitives`, and the shell answers all four from
+  its own static module table (`staticModules: rM()` in the web frontend). They
+  must therefore stay UNDECLARED. Declaring them would install a second React
+  into the profile, which is a real React #130 ("element type is invalid") risk.
+- A version already on the registry. npm will not overwrite it, so failing here
+  is better than discovering it after a tag push.
+
+### Releasing from CI
+
+`.github/workflows/publish.yml` runs on a `v*` tag and publishes with
+provenance. Manual dispatch defaults to a **dry run** — publishing is
+irreversible under a version, and a tag is a deliberate act where a push to
+`main` is not. Set an `NPM_TOKEN` secret (an automation token for the package).
+
+### Before the first publish
+
+`npm whoami` returning `E401` means no credentials are present; `npm login`
+first. Publishing needs a token of your own — it cannot be done on your behalf.

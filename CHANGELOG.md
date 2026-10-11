@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/prepublish-check.mjs` and `npm run release`: a publish gate that packs
+  for real and inspects the tarball a registry consumer receives — required paths
+  present, `files` entries actually packed, every `exports` target resolvable, no
+  runtime dependency that would duplicate what the shell already supplies, and the
+  version still free on the registry. `npm run check` proves the source is sound;
+  this proves the shipped artifact is.
+- `.github/workflows/publish.yml`: tag-gated release workflow running the full
+  gate and publishing with npm provenance. Manual dispatch defaults to a dry run.
+
+### Fixed
+
+- Restart no longer leaves the app closed. The relaunch fired as soon as the port
+  went quiet, but macOS holds the single-instance lock until the old process is
+  gone, so the replacement started, failed `requestSingleInstanceLock()`, and quit
+  itself — `open -n` exiting 0 while nothing appeared. The helper now waits for the
+  dying process to exit before launching.
+- Writes from the desktop app were refused with 403. The shell's protocol handler
+  deletes `origin` before forwarding a page request to the loopback host, so every
+  desktop mutation arrived without the header the same-origin guard demanded.
+- The two buttons had no visible border: three referenced CSS custom properties
+  (`--dsw-alias-border-primary`, `-secondary`, `-bg-elevated`) are not defined by
+  any shell stylesheet and were silently resolving to nothing.
+
 ## [0.1.0] - 2026-10-10
 
 ### Added
