@@ -14,10 +14,10 @@
  */
 import { useEffect, useId, useRef, useState } from 'react'
 import {
-  IconCheckOutline16,
-  IconLoadingOutline16,
-  IconRefreshOutline16,
-  IconWarningOutline16,
+  IconCheckOutlineRegular,
+  IconLoadingOutlineRegular,
+  IconRefreshOutlineRegular,
+  IconWarningOutlineRegular,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -117,6 +117,69 @@ function useSidebarGeometry(): { readonly collapsed: boolean; readonly width: nu
   return geometry
 }
 
+/** Height of the band the controls occupy, in px; mirrors `--dsh-controls-row-height`. */
+const RESERVED_ROW_HEIGHT = 34
+
+/**
+ * Push ui-sidebar's own content down so the floating controls get a band of
+ * their own.
+ *
+ * The overlay layer is painted ABOVE the columns and intercepts nothing, so
+ * without this the buttons would sit on top of the brand row or the first
+ * content row — whichever we choose, they would cover a real control, because
+ * the sidebar's top area is fully packed: a 60px brand band starting at 6px,
+ * then the new-session button at 70px, then the panel list.
+ *
+ * ui-sidebar lays those rows out as direct children of its own root, so there
+ * is no single scroller to pad. Instead we find the brand row and push every
+ * following sibling down by the band height with `margin-top`. That leaves the
+ * brand row untouched (it stays where DSH put it) and opens exactly the gap the
+ * controls need. Every override is recorded and undone on unmount.
+ */
+function useReservedRow(): void {
+  useEffect(() => {
+    /** Elements we have shifted, with their original `margin-top` values. */
+    const shifted = new Map<HTMLElement, string>()
+
+    const release = (): void => {
+      for (const [element, value] of shifted) element.style.marginTop = value
+      shifted.clear()
+    }
+
+    const apply = (): void => {
+      const brandRow = document.querySelector<HTMLElement>('[class*="logoRow"]')
+      const parent = brandRow?.parentElement
+      if (brandRow === null || brandRow === undefined || parent === null || parent === undefined) return
+
+      const rows = [...parent.children].filter((child): child is HTMLElement => child instanceof HTMLElement)
+      const index = rows.indexOf(brandRow)
+      if (index < 0) return
+
+      // The rows after the brand band are the ones that must move down. If the
+      // shift is already in place, leave the recorded originals alone.
+      const followers = rows.slice(index + 1)
+      if (followers.length === 0) return
+      if (followers.every((element) => shifted.has(element))) return
+
+      release()
+      for (const element of followers) {
+        shifted.set(element, element.style.marginTop)
+        element.style.marginTop = `${RESERVED_ROW_HEIGHT}px`
+      }
+    }
+
+    apply()
+    const observer = new MutationObserver(apply)
+    observer.observe(document.body, { childList: true, subtree: true })
+    window.addEventListener('resize', apply)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', apply)
+      release()
+    }
+  }, [])
+}
+
 /**
  * Render the update + restart controls.
  * @param props - composed slot props (runtime share + locale seat).
@@ -125,6 +188,7 @@ function useSidebarGeometry(): { readonly collapsed: boolean; readonly width: nu
 export function TopRowControls({ t }: TopRowControlsProps) {
   const controls = useControls()
   const geometry = useSidebarGeometry()
+  useReservedRow()
   const [panelOpen, setPanelOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const panelId = useId()
@@ -229,21 +293,21 @@ export function TopRowControls({ t }: TopRowControlsProps) {
 
 /** The update button's glyph, reflecting its phase. */
 function UpdateGlyph({ update }: { readonly update: UpdateState }) {
-  if (updateBusy(update)) return <IconLoadingOutline16 className={css.spinner} size={16} />
-  if (update.phase === 'done') return <IconCheckOutline16 size={16} />
+  if (updateBusy(update)) return <IconLoadingOutlineRegular className={css.spinner} size={16} />
+  if (update.phase === 'done') return <IconCheckOutlineRegular size={16} />
   if (update.unavailable !== undefined || update.error !== undefined) {
-    return <IconWarningOutline16 size={16} />
+    return <IconWarningOutlineRegular size={16} />
   }
-  return <IconRefreshOutline16 size={16} />
+  return <IconRefreshOutlineRegular size={16} />
 }
 
 /** The restart button's glyph, reflecting its phase. */
 function RestartGlyph({ restart }: { readonly restart: RestartState }) {
   if (restart.phase === 'requesting' || restart.phase === 'restarting') {
-    return <IconLoadingOutline16 className={css.spinner} size={16} />
+    return <IconLoadingOutlineRegular className={css.spinner} size={16} />
   }
-  if (restart.phase === 'failed' || restart.phase === 'timeout') return <IconWarningOutline16 size={16} />
-  return <IconRefreshOutline16 size={16} />
+  if (restart.phase === 'failed' || restart.phase === 'timeout') return <IconWarningOutlineRegular size={16} />
+  return <IconRefreshOutlineRegular size={16} />
 }
 
 /** Data attribute driving the update button's error/ok coloring. */

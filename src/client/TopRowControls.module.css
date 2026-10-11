@@ -27,6 +27,14 @@
   --dsh-controls-sidebar-padding: 12px;
   --dsh-controls-rail-padding: 10px;
   --dsh-controls-rail-width: 56px;
+  /* Bottom edge of ui-sidebar's brand band (a 60px row starting at 6px), plus
+     a 4px gap. The controls claim their own band below it; see
+     `useReservedRow` in TopRowControls.tsx, which pushes ui-sidebar's first
+     content row down by the same amount so the two never touch. */
+  --dsh-controls-row-top: 70px;
+  /* Height of the band the controls occupy, mirrored onto the sidebar column
+     as top padding so its own content starts underneath. */
+  --dsh-controls-row-height: 34px;
 
   /* Anchored to the sidebar's top-right corner: the row is
      `justify-content: flex-end` expanded, `flex-start` in the rail. */
@@ -43,11 +51,15 @@
   padding: 6px var(--dsh-controls-rail-padding) 0 0;
 }
 
-/* Expanded sidebar: the box spans the column and pins the buttons to its
-   right edge, where the collapse toggle already sits. */
+/* Expanded sidebar: ui-sidebar's `_logoRow` is a full-width 60px band that
+   holds the brand lockup, so there is no horizontal room left in it — the
+   wordmark already reaches the collapse toggle. Drop the buttons BELOW that
+   band and pin them to the sidebar's padded right edge. */
 .root[data-collapsed='false'] {
-  width: var(--dsh-controls-sidebar-width, 260px);
-  padding-right: var(--dsh-controls-sidebar-padding);
+  top: var(--dsh-controls-row-top);
+  width: calc(var(--dsh-controls-sidebar-width, 260px) - var(--dsh-controls-sidebar-padding));
+  justify-content: flex-end;
+  padding: 0;
 }
 
 .buttons {
@@ -77,11 +89,27 @@
   cursor: pointer;
 }
 
-/* In the 56px rail there is no room for a label, so the buttons square up to
-   the rail's 36px controls (matching .collapsed .iconButton). */
+/* In the 56px rail there is no room for a label, so the buttons shrink to the
+   rail's own icon size. Two 26px buttons plus a 4px gap fill the rail's 56px
+   width exactly, letting both sit on one row. */
 .root[data-collapsed='true'] .button {
-  min-width: 36px;
-  height: 36px;
+  min-width: 26px;
+  height: 26px;
+}
+
+/* The rail's brand row is owned end-to-end by the collapse toggle, so there is
+   no horizontal room left in it. Both buttons share a single row directly
+   below that band, centred in the 56px rail. */
+.root[data-collapsed='true'] {
+  top: var(--dsh-controls-row-top);
+  width: var(--dsh-controls-rail-width);
+  padding: 0;
+  justify-content: center;
+}
+
+.root[data-collapsed='true'] .buttons {
+  flex-direction: row;
+  gap: 4px;
 }
 
 .button:hover:not(:disabled) {
@@ -149,6 +177,10 @@
 
 /* --- Progress popover ------------------------------------------------- */
 
+/* The panel is anchored to the root's right edge, which sits at the sidebar's
+   padded edge — far narrower than the panel itself (280px column vs a 340px
+   popover). Left unclamped it would hang off the left of the viewport, so cap
+   it against the distance from the viewport's left edge to that anchor. */
 .panel {
   position: absolute;
   top: calc(100% + 6px);
@@ -156,7 +188,7 @@
   z-index: 1;
   box-sizing: border-box;
   width: 340px;
-  max-width: min(340px, calc(100vw - 24px));
+  max-width: min(340px, calc(var(--dsh-controls-sidebar-width, 260px) - 12px));
   max-height: min(60vh, 420px);
   overflow: auto;
   border: 1px solid var(--dsw-alias-border-l2);

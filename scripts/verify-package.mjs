@@ -26,7 +26,7 @@
  */
 
 import { readFile, stat } from 'node:fs/promises'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -50,6 +50,24 @@ function check(ok, label, detail = '') {
   } else {
     failures.push(detail === '' ? label : `${label} — ${detail}`)
   }
+}
+
+/**
+ * Recursively collect `.ts`/`.tsx` paths under a directory.
+ * @param dir - absolute directory to walk.
+ * @returns absolute file paths.
+ */
+function collectSources(dir) {
+  const found = []
+  const walk = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = join(current, entry.name)
+      if (entry.isDirectory()) walk(path)
+      else if (/\.tsx?$/.test(entry.name)) found.push(path)
+    }
+  }
+  if (existsSync(dir)) walk(dir)
+  return found
 }
 
 /**
@@ -141,6 +159,67 @@ check(
   'dsh.client.platform is "web"',
   String(manifest?.dsh?.client?.platform),
 )
+
+// Every `@deepseek-ai/dsh-client-ui-primitives` member we import must actually be
+// exported by the version we build against. This is a real, previously shipped
+// bug: ui-primitives renamed its icons from `Icon*Outline16` to
+// `Icon*OutlineRegular` between the 0.1.x and 0.2.x trains. Our devDependency
+// was pinned to 0.1.1-rc.2 while the app's runtime shipped 0.2.0-rc.2, so the
+// old names typechecked cleanly and then resolved to `undefined` at runtime —
+// React threw error #130 ("element type is invalid") and the whole slot entry
+// crashed, taking both buttons down with it. A green typecheck CANNOT catch
+// that on its own, because it trusts whichever copy npm happened to install.
+{
+  const primitivesRel = 'node_modules/@deepseek-ai/dsh-client-ui-primitives'
+  const primitivesEntry = join(ROOT, primitivesRel, 'lib/index.js')
+  if (!existsSync(primitivesEntry)) {
+    check(false, 'ui-primitives is installed for the icon-name guard', `${primitivesRel} not found`)
+  } else {
+    const entry = await readFile(primitivesEntry, 'utf8')
+    const exported = new Set()
+    // The package ships `export { a, b as c, ... }` blocks; collect the public
+    // (post-`as`) names.
+    for (const block of entry.matchAll(/export\s*\{([\s\S]*?)\}/g)) {
+      for (const raw of block[1].split(',')) {
+        const token = raw.trim()
+        if (token === '') continue
+        const parts = token.split(/\s+as\s+/)
+        exported.add((parts[1] ?? parts[0]).trim())
+      }
+    }
+
+    // Every name imported from primitives across the client sources.
+    const clientDir = join(ROOT, 'src/client')
+    const imported = new Set()
+    for (const rel of collectSources(clientDir)) {
+      const source = await readFile(rel, 'utf8')
+      for (const m of source.matchAll(
+        /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'@deepseek-ai\/dsh-client-ui-primitives'/g,
+      )) {
+        for (const raw of m[1].split(',')) {
+          const token = raw.trim().replace(/^type\s+/, '')
+          if (token === '') continue
+          imported.add(token.split(/\s+as\s+/)[0].trim())
+        }
+      }
+    }
+
+    check(
+      imported.size > 0,
+      'ui-primitives imports were discovered for the icon-name guard',
+      `${imported.size} names found under src/client`,
+    )
+    const unknown = [...imported].filter((name) => !exported.has(name)).sort()
+    check(
+      unknown.length === 0,
+      'every imported ui-primitives member is exported by the installed version',
+      unknown.length === 0
+        ? `${imported.size} names verified against ${exported.size} exports`
+        : `not exported: ${unknown.join(', ')} — these resolve to undefined at runtime and crash the slot entry`,
+    )
+  }
+}
+
 check(
   manifest?.exports?.['./client'] !== undefined,
   'exports["./client"] is declared',

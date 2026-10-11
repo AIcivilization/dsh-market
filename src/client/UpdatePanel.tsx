@@ -7,7 +7,7 @@
  * props from the parent, which owns the single set of state machines.
  */
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { OperationPackage } from './api.ts'
 import type { UpdateRow, UpdateState } from './state.ts'
 import { progressOf } from './state.ts'
@@ -104,7 +104,7 @@ export function UpdatePanel({ state, t, onClose }: UpdatePanelProps) {
       <header className={css.panelHeader}>
         <h2 className={css.panelTitle}>{t('panelTitle')}</h2>
         <button type="button" className={css.panelClose} aria-label={t('dismiss')} onClick={onClose}>
-          <IconCloseOutline16 size={14} />
+          <IconCloseOutlineRegular size={14} />
         </button>
       </header>
 
