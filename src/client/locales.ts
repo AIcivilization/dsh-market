@@ -71,7 +71,10 @@ export const zh = {
   unsupportedUpdate: '当前 DSH 版本不支持插件更新。',
   unsupportedRestart: '当前 DSH 版本不支持重启。',
   hostUnreachable: '无法连接 DSH 服务。',
-  desktopRestartUnsupported: '桌面版由应用外壳管理重启，请手动退出并重新打开 DSH。',
+  // The desktop shell owns this process and gives no IPC route to restart it,
+  // so point at the app's own one-click restart rather than telling the user
+  // to quit and relaunch by hand.
+  desktopRestartUnsupported: '桌面版由应用外壳管理重启，请用应用菜单的「重启应用与 Host」。',
   busyUpdate: '正在更新插件，请稍候。',
   busyRestart: 'DSH 正在重启。',
 } satisfies Record<string, string>
@@ -141,7 +144,7 @@ export const en = {
   unsupportedUpdate: 'This DSH version does not support plugin updates.',
   unsupportedRestart: 'This DSH version does not support restarting.',
   hostUnreachable: 'Cannot reach the DSH server.',
-  desktopRestartUnsupported: 'The desktop app owns its own restart — please quit and reopen DSH.',
+  desktopRestartUnsupported: 'The desktop app owns this process — use "Restart App and Host" from its menu.',
   busyUpdate: 'An update is already running.',
   busyRestart: 'DSH is restarting.',
 } satisfies Record<TopRowControlsLocaleKey, string>

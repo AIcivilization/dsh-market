@@ -17,6 +17,19 @@
  *    inside leaves the app with a dead profile and no way to bring it back,
  *    because the relaunch belongs to the shell.
  *
+ *    This was verified against the shipped shell rather than assumed. The
+ *    shell's own restart is `restart: () => { app.relaunch();
+ *    quitWithoutConfirmation() }`, and it lives in the Electron MAIN process.
+ *    The host runs as a `spawn`ed child over a Node IPC channel
+ *    (`stdio: [..., "ipc"]`), but the shell validates every inbound message
+ *    with `isDesktopHostEvent` and accepts only `shutdown-complete`, `ready`,
+ *    `platform-session`, `fatal`, `update-tasks` and `quit-inspection` —
+ *    anything else is treated as a protocol violation and the host is killed
+ *    with SIGTERM. There is no message that asks the shell to relaunch, so a
+ *    plugin literally cannot trigger it. The user-facing answer is the app's
+ *    own menu item, `restartAppHostMenu`: 重启应用与 Host / Restart App and
+ *    Host, which is one click and already exists.
+ *
  *  - A plain **web** host (`dsh web` from a terminal) owns nothing but
  *    itself, so re-executing the exact invocation that booted it is safe.
  *
