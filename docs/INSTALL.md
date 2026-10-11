@@ -152,6 +152,29 @@ that execs it with `ELECTRON_RUN_AS_NODE=1`, and without the variable it fails
 with `exec: : not found`. The `-w` flag is required because the desktop profile
 is a pnpm workspace root.
 
+> **Reinstalling the same version needs the old copy removed first.** pnpm keys a
+> `file:` dependency on the version string in its manifest. Because this package
+> ships as a fixed `0.1.0` until it is released, reinstalling a *changed* tarball
+> makes pnpm report `Already up to date` — or a cheerful `Done` — while leaving
+> the previous files in `node_modules` untouched. `--force` does not reliably
+> defeat this. Remove the directory first:
+>
+> ```bash
+> rm -rf "$PROFILE/node_modules/dsh-market"
+> cd "$PROFILE" && "$NODE" "$PNPM" add -w "file:/absolute/path/to/dsh-market-0.1.0.tgz"
+> ```
+>
+> Never trust the success message. Confirm the bytes actually landed:
+>
+> ```bash
+> shasum -a 256 "$PROFILE/node_modules/dsh-market/client/client.js"
+> tar -xzOf /path/to/dsh-market-0.1.0.tgz package/client/client.js | shasum -a 256
+> ```
+>
+> The two must match. A stale install is invisible at runtime — the buttons keep
+> whatever behaviour the previous build had — so this is the first thing to check
+> when a change appears not to take effect.
+
 Then add the layer. `dsh plugin` does this for you; here it is manual:
 
 ```bash
