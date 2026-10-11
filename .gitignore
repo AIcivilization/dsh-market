@@ -4,8 +4,12 @@ node_modules/
 # Build outputs. These are gitignored but MUST stay listed in package.json
 # `files` so they still ship in the published tarball — npm honours `files`
 # regardless of .gitignore.
-lib/
-client/
+#
+# Both are anchored to the repository root on purpose: an unanchored `client/`
+# also matches `src/client/` and `tests/client/`, which silently keeps the
+# entire client half — source AND tests — out of the repository.
+/lib/
+/client/
 
 # TypeScript incremental state
 *.tsbuildinfo
