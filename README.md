@@ -73,12 +73,20 @@ Reads are loopback-only and same-origin; mutations additionally require a matchi
 ## Development
 
 ```sh
-npm install
-npm run build      # tsc + tsdown -> lib/ and client/
-npm run verify     # asserts both emitted artifacts are loadable
-npm test           # vitest
-npm run check      # all of the above
+pnpm install       # npm install does NOT work here — see below
+pnpm run build     # tsc + tsdown -> lib/ and client/
+pnpm run verify    # asserts both emitted artifacts are loadable
+pnpm test          # vitest
+pnpm run check     # all of the above
 ```
+
+**Use pnpm, not npm.** `npm install` in this repository aborts with
+`Cannot read properties of null (reading 'edgesOut')`. The trigger is
+`vitest@4.x`: it reproduces with `vitest` as the only dependency under npm
+10.9.8, disappears on `vitest@3.x`, and never occurs under pnpm 11. Nothing in
+this package is npm-specific — the scripts above work with any package manager
+that installs the tree, and `npm run <script>` is fine once dependencies are
+present. Only the install step needs pnpm.
 
 See [docs/INSTALL.md](docs/INSTALL.md) for installing a local build into a profile.
 

@@ -73,12 +73,19 @@ dsh plugin --profile web add dsh-market
 ## 开发
 
 ```sh
-npm install
-npm run build      # tsc + tsdown -> lib/ 与 client/
-npm run verify     # 断言两个产物都可加载
-npm test           # vitest
-npm run check      # 以上全部
+pnpm install       # 这里不能用 npm install，原因见下
+pnpm run build     # tsc + tsdown -> lib/ 与 client/
+pnpm run verify    # 断言两个产物都可加载
+pnpm test          # vitest
+pnpm run check     # 以上全部
 ```
+
+**请用 pnpm，不要用 npm。** 在本仓库执行 `npm install` 会直接报
+`Cannot read properties of null (reading 'edgesOut')` 而中止。触发点是
+`vitest@4.x`：在 npm 10.9.8 下，即使只把 `vitest` 作为唯一依赖也能复现；换成
+`vitest@3.x` 就正常；在 pnpm 11 下从不出现。本包本身没有任何 npm 专有内容——
+只要依赖装好了，上面这些命令用任何包管理器都能跑，`npm run <script>` 也一样。
+只有「安装依赖」这一步必须用 pnpm。
 
 把本地构建装进 profile 的方法见 [docs/INSTALL.md](docs/INSTALL.md)。
 
