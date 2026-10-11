@@ -29,7 +29,7 @@ import { buildCapabilities } from './capabilities.js'
 import { OperationStore } from './operations.js'
 import { addArgs, applyUpdate, resolvePackageManager, runCommand, verifyAppliedVersion } from './apply.js'
 import { checkUpdates, realDeps, type UpdatablePackage, type UpdateSummary } from './updates.js'
-import { restartCapability } from './runtime.js'
+import { restartCapability, type RestartDetection } from './runtime.js'
 import { scheduleRestart, servingPort } from './restart.js'
 import type { HostPackageManager } from './profile.js'
 
@@ -116,6 +116,15 @@ export interface RouteDeps {
   readonly startedBundles: readonly string[] | null
   /** True when the desktop shell's service was present on the host context. */
   readonly desktopService: boolean
+  /**
+   * Host-identity inputs for the restart verdict, forwarded to
+   * `restartCapability`. Tests supply these so a verdict about "is this the
+   * desktop app?" does not depend on the machine the suite happens to run on:
+   * one of the signals reads ELECTRON_RUN_AS_NODE, which is inherited from the
+   * app when the suite is run from a terminal inside DSH Desktop but absent
+   * from a plain shell. Production omits this and detects for real.
+   */
+  readonly detection?: RestartDetection
   /** The update-check inputs; defaults to the real network. */
   readonly deps?: ReturnType<typeof realDeps>
   /** The package manager runner, injectable for tests. */
@@ -168,6 +177,7 @@ export function createRoutes(deps: RouteDeps): HostRoute[] {
   const capabilities = (): ReturnType<typeof buildCapabilities> => buildCapabilities({
     profile: deps.profileName,
     desktopService: deps.desktopService,
+    ...(deps.detection === undefined ? {} : { detection: deps.detection }),
   })
 
   /**

@@ -9,7 +9,13 @@
  */
 
 import { version as packageVersion } from './version.js'
-import { detectRuntime, restartCapability, type RestartCapability, type Runtime } from './runtime.js'
+import {
+  detectRuntime,
+  restartCapability,
+  type RestartCapability,
+  type RestartDetection,
+  type Runtime,
+} from './runtime.js'
 
 /** Feature bits. A client that reads only this object can render correctly. */
 export interface Capabilities {
@@ -41,6 +47,11 @@ export interface CapabilitiesInput {
   readonly desktopService?: boolean
   readonly marketplaceVersion?: string
   readonly restart?: RestartCapability
+  /**
+   * Host-identity inputs for the restart verdict. Supplied by tests so the
+   * verdict does not depend on ambient environment; production omits it.
+   */
+  readonly detection?: RestartDetection
 }
 
 /**
@@ -52,10 +63,19 @@ export interface CapabilitiesInput {
  * and it carries its reason.
  */
 export function buildCapabilities(input: CapabilitiesInput): CapabilitiesPayload {
-  const restart = input.restart ?? restartCapability({ desktopService: input.desktopService === true })
-  // Derived from the SAME detection the restart verdict used, so the runtime
-  // and the restart reason can never disagree about what host this is.
-  const runtime: Runtime = input.desktopService === true
+  const restart = input.restart ?? restartCapability({
+    desktopService: input.desktopService === true,
+    ...(input.detection ?? {}),
+  })
+  // Derived from the SAME verdict the restart carries, not from a second
+  // detection. An earlier version keyed `runtime` off `desktopService` alone
+  // while the restart verdict went through the multi-signal threshold, so the
+  // two could describe different hosts in one response: with
+  // ELECTRON_RUN_AS_NODE inherited from the app (a real condition when the
+  // suite is run from a terminal inside DSH Desktop) the signal count moved
+  // and `runtime` said "desktop" while `restart.managedBy` said "market".
+  // Reading it back from the verdict makes disagreement unrepresentable.
+  const runtime: Runtime = restart.managedBy === 'desktop-host'
     ? 'desktop'
     : detectRuntime(process.argv, process.env, false)
   return {

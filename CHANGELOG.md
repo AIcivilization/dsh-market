@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `runtime` and `restart.managedBy` could describe different hosts in the same
+  `/api/capabilities` response. `runtime` keyed off `desktopService` while the
+  restart verdict went through a multi-signal threshold, and one of those
+  signals reads `ELECTRON_RUN_AS_NODE` — which is inherited from the app when a
+  terminal inside DSH Desktop runs the suite. The verdict is now read back from
+  a single value, so the two cannot disagree.
+- Two route tests asserted a restart verdict while leaving the host identity to
+  ambient detection, so they passed or failed depending on where they ran. The
+  route deps accept host-identity inputs, and both tests pin them.
 - Restart no longer leaves the app closed. The relaunch fired as soon as the port
   went quiet, but macOS holds the single-instance lock until the old process is
   gone, so the replacement started, failed `requestSingleInstanceLock()`, and quit

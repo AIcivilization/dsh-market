@@ -368,6 +368,23 @@ function supportedCapability(
 }
 
 /**
+ * The host-identity inputs a restart verdict is computed from.
+ *
+ * These exist so the question "is this the desktop app?" can be answered
+ * explicitly instead of being read off the ambient process. One contributing
+ * signal is ELECTRON_RUN_AS_NODE, which is inherited from the app when a
+ * terminal inside DSH Desktop runs something — so the same test could reach a
+ * different verdict depending on where it was started.
+ */
+export interface RestartDetection {
+  readonly argv?: readonly string[]
+  readonly env?: NodeJS.ProcessEnv
+  readonly ppid?: number
+  readonly execPath?: string
+  readonly parentComm?: (pid: number) => string | null
+}
+
+/**
  * Decide whether this process may restart itself, and why not when it may not.
  *
  * Checked in order of how much each constraint overrides the others: the
@@ -375,13 +392,8 @@ function supportedCapability(
  * a debugger owns the session. Only a plain, unowned `dsh web` may restart
  * itself.
  */
-export function restartCapability(options: {
+export function restartCapability(options: RestartDetection & {
   readonly desktopService?: boolean
-  readonly argv?: readonly string[]
-  readonly env?: NodeJS.ProcessEnv
-  readonly ppid?: number
-  readonly execPath?: string
-  readonly parentComm?: (pid: number) => string | null
   readonly debuggerAttached?: boolean
 } = {}): RestartCapability {
   const argv = options.argv ?? process.argv

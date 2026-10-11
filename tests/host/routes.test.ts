@@ -82,6 +82,30 @@ async function call(route: HostRoute, req: IncomingMessage): Promise<{ status: n
   return { status, body, headers }
 }
 
+/**
+ * A desktop host, stated outright.
+ *
+ * `desktopService` alone is only ONE of the signals the verdict counts, so a
+ * verdict that depends on it also depends on whatever else the environment
+ * happens to contribute. Pinning the detection inputs makes the answer the
+ * same on every machine.
+ */
+const WEB_DETECTION = {
+  argv: ['node', '/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js', '--profile', 'web'],
+  env: {},
+  ppid: 1,
+  execPath: '/usr/local/bin/node',
+  parentComm: () => null,
+} as const
+
+const DESKTOP_DETECTION = {
+  argv: ['node', '/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/lib/bin.js'],
+  env: {},
+  ppid: 1,
+  execPath: '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness',
+  parentComm: () => null,
+} as const
+
 const mount = (overrides: Partial<Parameters<typeof createRoutes>[0]> = {}): HostRoute[] => createRoutes({
   profileDir: makeProfile(),
   profileName: 'desktop',
@@ -341,7 +365,8 @@ describe('ping and capabilities', () => {
   })
 
   it('describes the feature set and the restart verdict', async () => {
-    const routes = mount()
+    // A plain web host, stated rather than detected — see DESKTOP_DETECTION.
+    const routes = mount({ detection: WEB_DETECTION })
     const response = await call(find(routes, `${ROUTE_PREFIX}/api/capabilities`), request({ url: '/api/capabilities' }))
     const body = response.body as {
       version: string
@@ -360,7 +385,14 @@ describe('ping and capabilities', () => {
   it('publishes the desktop verdict as restartable via the app bundle', async () => {
     // Desktop restart is supported, but by relaunching the Electron bundle
     // rather than re-executing the host, so the manager is still named.
-    const routes = mount({ desktopService: true })
+    //
+    // The host identity is stated, not detected. The desktop verdict is a
+    // multi-signal threshold and one of its signals reads ELECTRON_RUN_AS_NODE
+    // — set when this suite runs from a terminal inside DSH Desktop, absent
+    // from a plain shell. Left ambient, this assertion passed or failed
+    // depending on where it ran; the route's job is to publish a verdict, so
+    // the inputs are pinned here.
+    const routes = mount({ desktopService: true, detection: DESKTOP_DETECTION })
     const response = await call(find(routes, `${ROUTE_PREFIX}/api/capabilities`), request({ url: '/api/capabilities' }))
     const body = response.body as { runtime: string; features: Record<string, boolean>; restart: { supported: boolean; managedBy: string; reason?: string } }
     expect(body.runtime).toBe('desktop')
